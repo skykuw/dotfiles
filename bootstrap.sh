@@ -86,4 +86,20 @@ for pkg in */; do
   stow --restow --target="$HOME" "$pkg"
 done
 
+# --- Install oh-my-zsh -------------------------------------------------------
+# Run AFTER stow: KEEP_ZSHRC=yes preserves the symlinked ~/.zshrc that stow
+# just placed, so the omz installer doesn't replace it with its template.
+
+if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
+  echo "==> Installing oh-my-zsh"
+  if ! command -v zsh >/dev/null 2>&1; then
+    echo "zsh not found; install it via your package manager and re-run." >&2
+  else
+    RUNZSH=no KEEP_ZSHRC=yes \
+      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  fi
+else
+  echo "==> oh-my-zsh already installed"
+fi
+
 echo "==> Done."
