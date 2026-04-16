@@ -1,4 +1,6 @@
+# macOS / editors / VCS junk
 .DS_Store
+Brewfile.lock.json
 *.swp
 *.swo
 *~
