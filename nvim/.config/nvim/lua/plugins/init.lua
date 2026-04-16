@@ -27,7 +27,9 @@ return {
     'nvim-lualine/lualine.nvim',
     dependencies = { 'nvim-tree/nvim-web-devicons' },
     config = function()
-      require('lualine').setup({ options = { theme = 'catppuccin', globalstatus = true } })
+      -- 'auto' derives colors from the active colorscheme — works for catppuccin,
+      -- tokyonight, or anything else without needing a per-theme module.
+      require('lualine').setup({ options = { theme = 'auto', globalstatus = true } })
     end,
   },
   {
@@ -111,7 +113,7 @@ return {
     'williamboman/mason-lspconfig.nvim',
     dependencies = { 'williamboman/mason.nvim', 'neovim/nvim-lspconfig' },
     opts = {
-      ensure_installed = { 'pyright', 'gopls', 'rust_analyzer', 'lua_ls', 'clangd' },
+      ensure_installed = { 'pylsp', 'gopls', 'rust_analyzer', 'lua_ls', 'clangd' },
       automatic_enable = true, -- nvim 0.11+: auto-calls vim.lsp.enable for installed servers
     },
   },
@@ -138,7 +140,7 @@ return {
 
       -- Enable servers (mason-lspconfig.automatic_enable also covers mason-installed
       -- ones; this is harmless if duplicated, and covers system-installed servers too).
-      vim.lsp.enable({ 'pyright', 'gopls', 'rust_analyzer', 'lua_ls', 'clangd' })
+      vim.lsp.enable({ 'pylsp', 'gopls', 'rust_analyzer', 'lua_ls', 'clangd' })
 
       -- Buffer-local keymaps that only apply once an LSP attaches
       vim.api.nvim_create_autocmd('LspAttach', {

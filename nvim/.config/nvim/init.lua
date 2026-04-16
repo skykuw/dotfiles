@@ -71,7 +71,16 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 })
 
 --------------------------------------------------------------------------------
--- 4. Bootstrap lazy.nvim
+-- 4. Disable language providers we don't use (silences :checkhealth noise).
+--    These are only needed for legacy Vim plugins written in perl/ruby/python/node.
+--------------------------------------------------------------------------------
+vim.g.loaded_perl_provider    = 0
+vim.g.loaded_ruby_provider    = 0
+vim.g.loaded_python3_provider = 0
+vim.g.loaded_node_provider    = 0
+
+--------------------------------------------------------------------------------
+-- 5. Bootstrap lazy.nvim
 --------------------------------------------------------------------------------
 local lazypath = vim.fn.stdpath('data') .. '/lazy/lazy.nvim'
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
@@ -87,4 +96,6 @@ vim.opt.rtp:prepend(lazypath)
 
 require('lazy').setup('plugins', {
   change_detection = { notify = false },
+  -- No plugins use luarocks; disable to silence lazy's hererocks/luarocks warnings.
+  rocks = { enabled = false },
 })
