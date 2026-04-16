@@ -61,6 +61,7 @@ pkg_install           nvim      neovim    neovim     neovim     neovim    neovim
 pkg_install           rg        ripgrep   ripgrep    ripgrep    ripgrep   ripgrep  ripgrep
 # Note: on Debian/Ubuntu the `fd` binary is named `fdfind`. Symlink/alias if you want plain `fd`.
 pkg_install           fd        fd        fd-find    fd-find    fd        fd       fd
+pkg_install           tmux      tmux      tmux       tmux       tmux      tmux     tmux
 
 # --- Optional: Brewfile (macOS only, kept for parity if you add casks etc.) -
 
@@ -85,6 +86,18 @@ for pkg in */; do
   echo "  -> $pkg"
   stow --restow --target="$HOME" "$pkg"
 done
+
+# --- Install TPM (tmux plugin manager) and plugins --------------------------
+
+if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
+  echo "==> Installing TPM (tmux plugin manager)"
+  git clone --quiet https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
+fi
+
+if [[ -x "$HOME/.tmux/plugins/tpm/bin/install_plugins" ]] && [[ -f "$HOME/.tmux.conf" ]]; then
+  echo "==> Installing tmux plugins via TPM"
+  "$HOME/.tmux/plugins/tpm/bin/install_plugins" >/dev/null
+fi
 
 # --- Install oh-my-zsh -------------------------------------------------------
 # Run AFTER stow: KEEP_ZSHRC=yes preserves the symlinked ~/.zshrc that stow

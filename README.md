@@ -27,6 +27,11 @@ dotfiles/
 ├── zsh/                     # package: zsh config (oh-my-zsh based)
 │   ├── .zshrc               # universal — sources ~/.zshrc.local at end
 │   └── .zprofile            # universal — conditional MacPorts PATH
+├── tmux/                    # package: tmux config + TPM plugins
+│   └── .tmux.conf
+├── iterm2/                  # package: iTerm2 prefs (macOS only)
+│   └── .config/iterm2/
+│       └── com.googlecode.iterm2.plist
 ├── Brewfile                 # tools required to bootstrap
 ├── bootstrap.sh             # idempotent installer
 └── README.md
@@ -57,6 +62,34 @@ and holds personal/machine-specific aliases, paths, secrets-ish content.
 `bootstrap.sh` installs oh-my-zsh idempotently *after* stowing, so the omz
 installer's `KEEP_ZSHRC=yes` mode preserves the symlinked `.zshrc` rather than
 replacing it with the omz template.
+
+## Tmux (tmux package)
+
+`~/.tmux.conf` with sensible defaults (prefix `C-a`, mouse, vim-style pane
+nav, intuitive `|`/`-` splits, 50k history) plus TPM plugins:
+`tmux-sensible`, `tmux-resurrect`, `tmux-yank`, `vim-tmux-navigator`.
+
+`bootstrap.sh` clones TPM if missing and runs `install_plugins` so plugins
+materialize without needing `prefix + I` interactively.
+
+Reload after editing: `prefix + r`. Inside tmux, install/update plugins with
+`prefix + I` and `prefix + U`.
+
+## iTerm2 (iterm2 package, macOS only)
+
+The plist lives at `iterm2/.config/iterm2/com.googlecode.iterm2.plist` and
+stows to `~/.config/iterm2/`. **One-time manual step on a fresh machine:**
+
+iTerm2 → *Settings* → *General* → *Preferences* → check **"Load preferences
+from a custom folder or URL"** → set folder to `~/.config/iterm2/` → also
+check **"Save changes to folder when iTerm2 quits"** for bidirectional sync.
+
+After that, every iTerm2 settings change syncs straight into the dotfiles
+repo (binary plist, so no diffs — just commits).
+
+> **Privacy:** the plist may contain SSH host nicknames, profile names, or
+> anything you've configured in iTerm2's password manager. Review before
+> publishing this repo.
 
 To add a new bundle (e.g. zsh, git), create a sibling directory like `zsh/` with
 the file structure mirroring `$HOME`, then re-run `bootstrap.sh`.
