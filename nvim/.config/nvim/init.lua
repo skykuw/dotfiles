@@ -99,3 +99,14 @@ require('lazy').setup('plugins', {
   -- No plugins use luarocks; disable to silence lazy's hererocks/luarocks warnings.
   rocks = { enabled = false },
 })
+
+--------------------------------------------------------------------------------
+-- 6. Workaround: nvim-treesitter `master` branch (archived) ships markdown
+--    injection queries that crash on nvim 0.12 with
+--    "attempt to call method 'range' (a nil value)". Disable injections for
+--    markdown until either (a) we migrate to the nvim-treesitter `main` branch
+--    or (b) upstream patches master. Markdown itself still highlights — only
+--    the inner-language highlighting in fenced code blocks is dropped.
+--------------------------------------------------------------------------------
+pcall(vim.treesitter.query.set, 'markdown',        'injections', '')
+pcall(vim.treesitter.query.set, 'markdown_inline', 'injections', '')
