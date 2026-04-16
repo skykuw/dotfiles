@@ -11,6 +11,8 @@ of `$HOME` and get symlinked into place.
 dotfiles/
 ├── claude/                  # package: Claude Code config
 │   └── .claude/
+│       ├── CLAUDE.md        # global instructions for all projects
+│       ├── settings.json    # attribution, permissions, hooks, etc.
 │       └── skills/
 │           ├── code-review-author/
 │           ├── diagnose-codebase/
