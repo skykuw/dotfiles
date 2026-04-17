@@ -23,7 +23,7 @@ REMOTE="$(git rev-parse '@{u}' 2>/dev/null || true)"
 if [[ -z "$REMOTE" ]]; then
   {
     echo "No upstream configured for the current branch. Set one with:"
-    echo "  git branch --set-upstream-to=origin/main"
+    echo "  git branch --set-upstream-to=origin/master"
   } >&2
   exit 1
 fi

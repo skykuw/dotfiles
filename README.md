@@ -157,7 +157,7 @@ Each profile's `statusLine` calls `~/.claude/statusline.sh <profile>`, which
 renders a two-line status at the bottom of Claude Code:
 
 ```
-[personal] Opus 4.7  main*  $0.04  1m32s
+[personal] Opus 4.7  master*  $0.04  1m32s
 ctx 15.5k/1.0M 2%  cache 3:20  5h 12%  7d 34%
 ```
 
