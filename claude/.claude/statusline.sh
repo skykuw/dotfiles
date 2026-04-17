@@ -3,13 +3,23 @@
 #
 # Reads session JSON on stdin (schema: https://code.claude.com/docs/en/statusline#available-data)
 # and prints TWO lines:
-#   line 1 — identity:   [profile] model  git-branch*  $cost  elapsed
-#   line 2 — pressure:   ctx used/max pct%  cache m:ss  5h pct%  7d pct%
+#   line 1 — identity:   [profile] model  git-branch*  ~$cost  elapsed
+#   line 2 — pressure:   ctx used/max pct%  cache m:ss  [5h pct%  7d pct%]
 # Runs locally, consumes no tokens.
+#
+# Cost is always prefixed with `~` because it's a client-side estimate against
+# Anthropic's public price list — actual billing (subscription credits or
+# proxy-brokered API spend) may differ.
 #
 # Args:
 #   $1  profile name baked in by each settings template (e.g. "personal",
 #       "work/polaris"). Drives the tag color. Defaults to "unknown".
+#
+# Env:
+#   CLAUDE_STATUSLINE_RATELIMITS  on|off (default on). Set to off when
+#       Claude Code talks through a proxy (e.g. LiteLLM) that strips the
+#       Anthropic rate-limit headers, so the 5h/7d segments would otherwise
+#       sit at 0% and mislead.
 
 set -uo pipefail
 
@@ -47,7 +57,7 @@ IFS=$'\t' read -r \
     .model.display_name // "?",
     .workspace.current_dir // .cwd // "",
     (.context_window.used_percentage // 0),
-    ((.context_window.total_input_tokens // 0) + (.context_window.total_output_tokens // 0)),
+    ((.context_window.context_window_size // 200000) * (.context_window.used_percentage // 0) / 100),
     (.context_window.context_window_size // 200000),
     (.cost.total_cost_usd // 0),
     (.cost.total_duration_ms // 0),
@@ -144,7 +154,7 @@ human_k() {
 USED_H=$(human_k "$USED")
 MAX_H=$(human_k "$MAX")
 
-COST_H=$(awk -v c="$COST" 'BEGIN{ printf "$%.2f", c+0 }')
+COST_H=$(awk -v c="$COST" 'BEGIN{ printf "~$%.2f", c+0 }')
 
 DUR_S=$((DUR_MS / 1000))
 DUR_H=$(printf '%dm%02ds' $((DUR_S / 60)) $((DUR_S % 60)))
@@ -156,6 +166,8 @@ line1="${line1}  ${DIM}${COST_H}  ${DUR_H}${RESET}"
 
 line2="${CTX_COLOR}ctx ${USED_H}/${MAX_H} ${PCT}%${RESET}"
 line2="${line2}  ${CACHE_COLOR}cache ${CACHE_STR}${RESET}"
-line2="${line2}  ${RL5_COLOR}5h ${RL5}%${RESET}  ${RL7_COLOR}7d ${RL7}%${RESET}"
+if [[ "${CLAUDE_STATUSLINE_RATELIMITS:-on}" == "on" ]]; then
+  line2="${line2}  ${RL5_COLOR}5h ${RL5}%${RESET}  ${RL7_COLOR}7d ${RL7}%${RESET}"
+fi
 
 printf '%s\n%s' "$line1" "$line2"

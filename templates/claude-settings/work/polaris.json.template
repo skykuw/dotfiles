@@ -94,5 +94,8 @@
     "type": "command",
     "command": "bash ~/.claude/statusline.sh work/polaris",
     "refreshInterval": 5
+  },
+  "env": {
+    "CLAUDE_STATUSLINE_RATELIMITS": "off"
   }
 }

@@ -19,7 +19,7 @@ cd "$DOTFILES_DIR"
 list_profiles() {
   if [[ -d "$DOTFILES_DIR/templates/claude-settings" ]]; then
     (cd "$DOTFILES_DIR/templates/claude-settings" && \
-      find . -type f -name '*.json.template' \
+      find . -type f -name '*.json.template' ! -name '*.local.json.template' \
         | sed -e 's|^\./||' -e 's|\.json\.template$||' \
         | sort)
   fi
@@ -228,6 +228,23 @@ if [[ ! -e "$HOME/.claude/settings.json" ]]; then
   echo "==> Seeded ~/.claude/settings.json from profile '$PROFILE'"
 else
   echo "==> ~/.claude/settings.json already exists; leaving it alone (delete it to re-seed)"
+  if ! diff -q "$CLAUDE_PROFILE_TEMPLATE" "$HOME/.claude/settings.json" >/dev/null 2>&1; then
+    echo "    It differs from the '$PROFILE' template. To inspect:"
+    echo "      diff '$CLAUDE_PROFILE_TEMPLATE' '$HOME/.claude/settings.json'"
+    echo "    Tip: keep org/proxy-specific overrides in ~/.claude/settings.local.json"
+    echo "    so you can re-seed settings.json without losing them."
+  fi
+fi
+
+# Optional per-profile settings.local.json skeleton — for org/proxy bits that
+# must not live in the dotfiles repo. Only seeds if the profile ships a
+# *.local.json.template and the destination doesn't already exist. Mode 600
+# because Claude Code may rewrite it.
+CLAUDE_PROFILE_LOCAL_TEMPLATE="$DOTFILES_DIR/templates/claude-settings/${PROFILE}.local.json.template"
+if [[ -f "$CLAUDE_PROFILE_LOCAL_TEMPLATE" && ! -e "$HOME/.claude/settings.local.json" ]]; then
+  install -m 600 "$CLAUDE_PROFILE_LOCAL_TEMPLATE" "$HOME/.claude/settings.local.json"
+  echo "==> Seeded ~/.claude/settings.local.json from profile '$PROFILE'"
+  echo "    Edit it with your proxy URL / auth token / etc. before next Claude run."
 fi
 
 echo "==> Done."

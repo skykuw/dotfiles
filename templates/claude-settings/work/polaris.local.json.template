@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "//": [
+    "Local-only overrides for the work/polaris profile. Gitignored — fill in",
+    "real values; do not commit. Keys here override ~/.claude/settings.json,",
+    "so use this file for anything machine- or org-specific that should not",
+    "live in the dotfiles repo (proxy URL, auth token, telemetry opt-outs).",
+    "",
+    "Common fields when Claude Code talks through a LiteLLM (or similar) proxy:",
+    "  env.ANTHROPIC_BASE_URL    URL of the gateway",
+    "  env.ANTHROPIC_AUTH_TOKEN  static bearer token",
+    "  apiKeyHelper              shell command printing the current token on",
+    "                            stdout (preferred for SSO / rotating creds)",
+    "",
+    "Add only the keys you actually need. Empty strings are passed through",
+    "verbatim and may break Claude Code, so delete unused entries entirely."
+  ],
+  "env": {}
+}
