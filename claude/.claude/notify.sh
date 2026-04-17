@@ -17,11 +17,19 @@ set -uo pipefail
 REASON="${1:-unknown}"
 
 case "$REASON" in
-  idle_prompt)        TITLE="Claude Code"; MSG="waiting for input" ;;
-  permission_prompt)  TITLE="Claude Code"; MSG="needs permission" ;;
-  Stop)               TITLE="Claude Code"; MSG="finished" ;;
-  *)                  TITLE="Claude Code"; MSG="$REASON" ;;
+  idle_prompt)        TITLE="Claude Code"; MSG="waiting for input"; TOKEN="idle" ;;
+  permission_prompt)  TITLE="Claude Code"; MSG="needs permission";  TOKEN="perm" ;;
+  Stop)               TITLE="Claude Code"; MSG="finished";          TOKEN="done" ;;
+  *)                  TITLE="Claude Code"; MSG="$REASON";           TOKEN="$REASON" ;;
 esac
+
+# Drop a short-lived state file the statusline reads to fold the event token
+# into the iTerm2 badge. mtime acts as the TTL — statusline ignores entries
+# older than its window so the badge auto-clears once the user has had time
+# to react. Single-token contents keep the badge readable at pane-corner size.
+STATE_DIR="$HOME/.claude"
+mkdir -p "$STATE_DIR"
+printf '%s\n' "$TOKEN" >"$STATE_DIR/.notify_reason" 2>/dev/null || true
 
 is_iterm2() {
   # TERM_PROGRAM is set when iTerm2 is the local terminal. LC_TERMINAL is
@@ -37,15 +45,11 @@ iterm_notify() {
   {
     # OSC 9 ; text BEL → macOS Notification Center via iTerm2.
     printf '\e]9;%s: %s\a' "$TITLE" "$MSG" >/dev/tty
-    # Permission prompts genuinely block the turn — bounce the dock and set
-    # a persistent badge so the cue lasts until the user acts. The statusline
-    # tick (every 5s) will eventually overwrite the badge, which is fine —
-    # the dock bounce and notification have already done their job by then.
+    # Permission prompts genuinely block the turn — bounce the dock so the
+    # cue is hard to miss. Badge content is owned by the statusline (which
+    # reads the state file written above and renders `<token> <timer>`).
     if [[ "$REASON" == "permission_prompt" ]]; then
       printf '\e]1337;RequestAttention=yes\a' >/dev/tty
-      local b64
-      b64=$(printf 'perm needed' | base64 | tr -d '\n')
-      printf '\e]1337;SetBadgeFormat=%s\a' "$b64" >/dev/tty
     fi
   } 2>/dev/null || true
 }

@@ -40,6 +40,25 @@ case "$PROFILE" in
   *)        TAG_COLOR="$BOLD" ;;
 esac
 
+# --- Icons (nerd-font) -------------------------------------------------------
+# Set CLAUDE_STATUSLINE_ICONS=0 to fall back to text labels. Default on; the
+# off path matters when the local terminal isn't using a nerd font (icons
+# would render as tofu boxes), or when piping the statusline somewhere
+# log-grep-friendly. Only the genuinely-clarifying labels (ctx, cache) get
+# replaced — branch icon is decorative on top of the branch name.
+if [[ "${CLAUDE_STATUSLINE_ICONS:-1}" == "1" ]]; then
+  # UTF-8 byte escapes (not \uXXXX) so this works on macOS's stock bash 3.2,
+  # which doesn't expand \u in $'...'. Each glyph is from a nerd-font (any
+  # patched font set; JetBrainsMono Nerd Font is the one we install).
+  ICON_GIT=$'\xee\x9c\xa5 '            # U+E725  nf-dev-git_branch
+  CTX_LABEL=$'\xef\x82\x80  '          # U+F080  nf-fa-bar_chart
+  CACHE_LABEL=$'\xef\x80\x97  '        # U+F017  nf-fa-clock_o
+else
+  ICON_GIT=''
+  CTX_LABEL='ctx '
+  CACHE_LABEL='cache '
+fi
+
 if ! command -v jq >/dev/null 2>&1; then
   printf '%s[%s]%s  %s(install jq for cost/context)%s' \
     "$TAG_COLOR" "$PROFILE" "$RESET" "$DIM" "$RESET"
@@ -120,9 +139,9 @@ if [[ -n "$CWD" ]] && git -C "$CWD" --no-optional-locks rev-parse --git-dir >/de
     DIRTY=""
     if [[ -n "$(git -C "$CWD" --no-optional-locks status --porcelain 2>/dev/null | head -c1)" ]]; then
       DIRTY="*"
-      GIT_STR="${YELLOW}${BRANCH}${DIRTY}${RESET}"
+      GIT_STR="${YELLOW}${ICON_GIT}${BRANCH}${DIRTY}${RESET}"
     else
-      GIT_STR="${DIM}${BRANCH}${RESET}"
+      GIT_STR="${DIM}${ICON_GIT}${BRANCH}${RESET}"
     fi
   fi
 fi
@@ -164,8 +183,8 @@ line1="${TAG_COLOR}[${PROFILE}]${RESET} ${MODEL}"
 [[ -n "$GIT_STR" ]] && line1="${line1}  ${GIT_STR}"
 line1="${line1}  ${DIM}${COST_H}  ${DUR_H}${RESET}"
 
-line2="${CTX_COLOR}ctx ${USED_H}/${MAX_H} ${PCT}%${RESET}"
-line2="${line2}  ${CACHE_COLOR}cache ${CACHE_STR}${RESET}"
+line2="${CTX_COLOR}${CTX_LABEL}${USED_H}/${MAX_H} ${PCT}%${RESET}"
+line2="${line2}  ${CACHE_COLOR}${CACHE_LABEL}${CACHE_STR}${RESET}"
 if [[ "${CLAUDE_STATUSLINE_RATELIMITS:-on}" == "on" ]]; then
   line2="${line2}  ${RL5_COLOR}5h ${RL5}%${RESET}  ${RL7_COLOR}7d ${RL7}%${RESET}"
 fi
@@ -173,18 +192,33 @@ fi
 printf '%s\n%s' "$line1" "$line2"
 
 # --- iTerm2 pane badge ------------------------------------------------------
-# Mirror the most-glanceable bits of line2 into iTerm2's pane-corner badge so
-# the signal stays visible even when Claude Code is fullscreen and the
-# statusline is hidden, or when the user has switched to another tmux pane.
-# Refreshes on every tick (refreshInterval=5s) so the cache countdown stays
-# live. Writes to /dev/tty so the OSC bypasses Claude Code's stdout capture
-# of the statusline text. Gated on iTerm2 detection so non-iTerm2 terminals
-# don't render raw escape bytes.
+# Pane-corner overlay visible even when Claude Code is fullscreen or when the
+# user has switched to another tmux pane. Kept deliberately minimal — just
+# the cache countdown, optionally prefixed with a 4-char event token (perm,
+# idle, done) read from a state file written by notify.sh. Profile, ctx,
+# cost are intentionally omitted: they're already in the statusline below
+# and would just clutter the badge.
+#
+# State file uses mtime as TTL: notify.sh drops the file on each event;
+# statusline ignores entries older than NOTIFY_TTL_S so the badge auto-
+# clears once the user has had time to react. No explicit "clear" hook
+# required, which keeps notify.sh simple.
+NOTIFY_TTL_S=60
 if [[ "${TERM_PROGRAM:-}" == "iTerm.app" || "${LC_TERMINAL:-}" == "iTerm2" ]]; then
-  badge=$(printf '%s · ctx %d%% · c %s' "$PROFILE" "$PCT" "$CACHE_STR")
+  reason=""
+  reason_file="$HOME/.claude/.notify_reason"
+  if [[ -r "$reason_file" ]]; then
+    # macOS uses `stat -f %m`, GNU stat (Linux) uses `stat -c %Y`. Try both.
+    file_mtime=$(stat -f %m "$reason_file" 2>/dev/null || stat -c %Y "$reason_file" 2>/dev/null || echo 0)
+    if (( NOW - file_mtime < NOTIFY_TTL_S )); then
+      reason=$(head -c 8 "$reason_file" | tr -d '[:space:]')
+    fi
+  fi
+  if [[ -n "$reason" ]]; then
+    badge=$(printf '%s %s' "$reason" "$CACHE_STR")
+  else
+    badge="$CACHE_STR"
+  fi
   badge_b64=$(printf '%s' "$badge" | base64 | tr -d '\n')
-  # Brace group so a missing controlling tty (statusline runs as a child of
-  # Claude Code; on platforms where the captured stdio includes no tty, the
-  # redirect would otherwise leak "Device not configured" to stderr).
   { printf '\e]1337;SetBadgeFormat=%s\a' "$badge_b64" >/dev/tty; } 2>/dev/null || true
 fi
