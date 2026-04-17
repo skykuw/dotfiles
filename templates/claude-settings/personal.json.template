@@ -89,5 +89,8 @@
     "type": "command",
     "command": "bash ~/.claude/statusline.sh personal",
     "refreshInterval": 5
+  },
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "opus"
   }
 }
