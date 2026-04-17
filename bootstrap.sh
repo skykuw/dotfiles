@@ -73,7 +73,7 @@ fi
 # --- Stow packages -----------------------------------------------------------
 
 # Each top-level directory (other than these) is a stow package.
-EXCLUDES=(.git Brewfile Brewfile.lock.json README.md bootstrap.sh .gitignore)
+EXCLUDES=(.git Brewfile Brewfile.lock.json README.md bootstrap.sh .gitignore templates)
 
 echo "==> Stowing packages into $HOME"
 for pkg in */; do
@@ -114,5 +114,27 @@ if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
 else
   echo "==> oh-my-zsh already installed"
 fi
+
+# --- Seed local-only template files if missing ------------------------------
+# Files like ~/.gitconfig.local and ~/.ssh/config.local hold identity and
+# host-specific bits that don't belong in the repo. On a fresh machine, drop a
+# template in place so the user has something to edit. Existing files are
+# never touched.
+
+seed_template() {
+  local template="$1" dest="$2"
+  if [[ ! -e "$dest" && -f "$template" ]]; then
+    local parent; parent="$(dirname "$dest")"
+    mkdir -p "$parent"
+    # SSH demands ~/.ssh be 700; safe to enforce only on that specific dir.
+    # Don't blindly chmod $parent — that would mangle $HOME's permissions.
+    [[ "$parent" == "$HOME/.ssh" ]] && chmod 700 "$parent"
+    install -m 400 "$template" "$dest"
+    echo "==> Created $dest from template — edit it with your details (chmod u+w to unlock)"
+  fi
+}
+
+seed_template "$DOTFILES_DIR/templates/gitconfig.local"  "$HOME/.gitconfig.local"
+seed_template "$DOTFILES_DIR/templates/ssh-config.local" "$HOME/.ssh/config.local"
 
 echo "==> Done."

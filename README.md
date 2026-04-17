@@ -32,6 +32,14 @@ dotfiles/
 ├── iterm2/                  # package: iTerm2 prefs (macOS only)
 │   └── .config/iterm2/
 │       └── com.googlecode.iterm2.plist
+├── git/                     # package: git config (with local split)
+│   └── .gitconfig
+├── ssh/                     # package: SSH config (with local split)
+│   └── .ssh/
+│       └── config
+├── templates/               # placeholder configs seeded by bootstrap.sh
+│   ├── gitconfig.local      #   → seeded to ~/.gitconfig.local if missing
+│   └── ssh-config.local     #   → seeded to ~/.ssh/config.local if missing
 ├── Brewfile                 # tools required to bootstrap
 ├── bootstrap.sh             # idempotent installer
 └── README.md
@@ -90,6 +98,26 @@ repo (binary plist, so no diffs — just commits).
 > **Privacy:** the plist may contain SSH host nicknames, profile names, or
 > anything you've configured in iTerm2's password manager. Review before
 > publishing this repo.
+
+## Git and SSH (git, ssh packages — tracked/local split)
+
+Both use the same pattern as `zsh`: a tracked universal file + a local
+read-only file for personal identity / machine-specific settings.
+
+**Git:**
+- `git/.gitconfig` (tracked) — `push.default`, `init.defaultBranch`, `pull.rebase`, then `[include] path = ~/.gitconfig.local`
+- `~/.gitconfig.local` (**NOT tracked**, chmod 400) — `[user]` identity + `[credential] helper` (macOS-specific; change to `cache` or `libsecret` on Linux)
+
+**SSH:**
+- `ssh/.ssh/config` (tracked) — `Include ~/.ssh/config.local` at top, then `Host *` defaults (ServerAlive, AddKeysToAgent, UseKeychain)
+- `~/.ssh/config.local` (**NOT tracked**, chmod 400) — per-host `IdentityFile` / `HostName` entries
+- SSH's first-match-wins rule + putting `Include` at the top of the tracked file means local settings override defaults automatically
+
+On a fresh machine, `bootstrap.sh` seeds `~/.gitconfig.local` and
+`~/.ssh/config.local` from `templates/gitconfig.local` and
+`templates/ssh-config.local` (chmod 400). Existing files are never touched.
+Edit the seeded files with your real identity and hosts; `chmod u+w` first
+since they're created read-only.
 
 To add a new bundle (e.g. zsh, git), create a sibling directory like `zsh/` with
 the file structure mirroring `$HOME`, then re-run `bootstrap.sh`.

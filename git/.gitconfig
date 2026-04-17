@@ -1,0 +1,18 @@
+# ~/.gitconfig — universal git config (tracked in dotfiles).
+# Personal/machine-specific settings (identity, credential helper) live in
+# ~/.gitconfig.local — that file is NOT in the repo and is loaded last so it
+# overrides anything here.
+
+[push]
+	default = simple
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = false
+
+[include]
+	# Loaded last so its values override the tracked file. Missing files are
+	# silently ignored, so this is safe on a fresh machine before .local exists.
+	path = ~/.gitconfig.local
