@@ -37,9 +37,9 @@ dotfiles/
 ├── ssh/                     # package: SSH config (with local split)
 │   └── .ssh/
 │       └── config
-├── templates/               # placeholder configs seeded by bootstrap.sh
-│   ├── gitconfig.local      #   → seeded to ~/.gitconfig.local if missing
-│   └── ssh-config.local     #   → seeded to ~/.ssh/config.local if missing
+├── templates/                       # placeholder configs seeded by bootstrap.sh
+│   ├── gitconfig.local.template     #   → seeded to ~/.gitconfig.local if missing
+│   └── ssh-config.local.template    #   → seeded to ~/.ssh/config.local if missing
 ├── Brewfile                 # tools required to bootstrap
 ├── bootstrap.sh             # idempotent installer
 └── README.md
@@ -114,10 +114,12 @@ read-only file for personal identity / machine-specific settings.
 - SSH's first-match-wins rule + putting `Include` at the top of the tracked file means local settings override defaults automatically
 
 On a fresh machine, `bootstrap.sh` seeds `~/.gitconfig.local` and
-`~/.ssh/config.local` from `templates/gitconfig.local` and
-`templates/ssh-config.local` (chmod 400). Existing files are never touched.
-Edit the seeded files with your real identity and hosts; `chmod u+w` first
-since they're created read-only.
+`~/.ssh/config.local` from `templates/*.template` (chmod 400). Existing
+files are never touched. Edit the seeded files with your real identity and
+hosts; `chmod u+w` first since they're created read-only.
+
+The templates use a `.template` suffix (not `.local`) so they're not caught
+by the `*.local` rule in `.gitignore`.
 
 To add a new bundle (e.g. zsh, git), create a sibling directory like `zsh/` with
 the file structure mirroring `$HOME`, then re-run `bootstrap.sh`.

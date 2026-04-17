@@ -1,0 +1,19 @@
+# ~/.gitconfig.local — personal/machine-specific git config (NOT tracked).
+# Loaded by ~/.gitconfig via [include]. Created from template on bootstrap if
+# missing. Edit with your details, then re-apply chmod 400 if you wish.
+
+[user]
+	# TODO: replace with your identity
+	email = your.email@example.com
+	name  = Your Name
+
+[credential]
+	# Pick the helper that matches your OS:
+	#   macOS:  osxkeychain
+	#   Linux:  cache         (in-memory, default 15 min — use --timeout to extend)
+	#   Linux:  libsecret     (persistent, requires libsecret-tools)
+	helper = osxkeychain
+
+# Optional: per-host signing key, GPG/SSH signing, work-vs-personal identity
+# overrides via [includeIf "gitdir:~/work/**"] etc. Keep that here, not in the
+# tracked .gitconfig.

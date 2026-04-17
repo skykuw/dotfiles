@@ -1,0 +1,20 @@
+# ~/.ssh/config.local — personal/machine-specific SSH config (NOT tracked).
+# Loaded first by ~/.ssh/config via Include, so entries here take precedence
+# over the tracked Host * defaults. Created from template on bootstrap if
+# missing. Edit with your hosts, then re-apply chmod 400 if you wish.
+
+# Example: GitHub with a custom identity file
+# Host github.com
+# 	HostName github.com
+# 	IdentityFile ~/.ssh/id_ed25519
+
+# Example: a multi-account GitHub alias (use git@<alias>:user/repo.git URLs)
+# Host work.github.com
+# 	HostName github.com
+# 	IdentityFile ~/.ssh/id_work
+
+# Example: jump host for an internal network
+# Host internal-box
+# 	HostName 10.0.0.42
+# 	User myuser
+# 	ProxyJump bastion.example.com

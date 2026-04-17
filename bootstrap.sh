@@ -134,7 +134,7 @@ seed_template() {
   fi
 }
 
-seed_template "$DOTFILES_DIR/templates/gitconfig.local"  "$HOME/.gitconfig.local"
-seed_template "$DOTFILES_DIR/templates/ssh-config.local" "$HOME/.ssh/config.local"
+seed_template "$DOTFILES_DIR/templates/gitconfig.local.template"  "$HOME/.gitconfig.local"
+seed_template "$DOTFILES_DIR/templates/ssh-config.local.template" "$HOME/.ssh/config.local"
 
 echo "==> Done."
