@@ -4,14 +4,14 @@
     "commit": "",
     "pr": ""
   },
-  "model": "opus",
+  "model": "claude-opus-4-7[1m]",
   "alwaysThinkingEnabled": true,
   "effortLevel": "high",
   "showThinkingSummaries": true,
   "tui": "fullscreen",
   "cleanupPeriodDays": 90,
   "permissions": {
-    "defaultMode": "auto",
+    "defaultMode": "plan",
     "additionalDirectories": ["~/.claude/"],
     "allow": [
       "Read",
