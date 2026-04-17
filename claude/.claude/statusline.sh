@@ -153,8 +153,11 @@ if [[ -n "$CWD" ]] && git -C "$CWD" --no-optional-locks rev-parse --git-dir >/de
 fi
 
 # --- Pressure colors ---------------------------------------------------------
-if   (( PCT >= 80 )); then CTX_COLOR="$RED"
-elif (( PCT >= 50 )); then CTX_COLOR="$YELLOW"
+# Aggressive ramp: cyan <10%, yellow 10–14%, red ≥15%. Even 15% of a 1M
+# window is 150k tokens — large enough that compaction risk and per-turn
+# cost are already worth flagging early.
+if   (( PCT >= 15 )); then CTX_COLOR="$RED"
+elif (( PCT >= 10 )); then CTX_COLOR="$YELLOW"
 else                       CTX_COLOR="$CYAN"
 fi
 
