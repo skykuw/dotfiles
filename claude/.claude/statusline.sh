@@ -171,3 +171,20 @@ if [[ "${CLAUDE_STATUSLINE_RATELIMITS:-on}" == "on" ]]; then
 fi
 
 printf '%s\n%s' "$line1" "$line2"
+
+# --- iTerm2 pane badge ------------------------------------------------------
+# Mirror the most-glanceable bits of line2 into iTerm2's pane-corner badge so
+# the signal stays visible even when Claude Code is fullscreen and the
+# statusline is hidden, or when the user has switched to another tmux pane.
+# Refreshes on every tick (refreshInterval=5s) so the cache countdown stays
+# live. Writes to /dev/tty so the OSC bypasses Claude Code's stdout capture
+# of the statusline text. Gated on iTerm2 detection so non-iTerm2 terminals
+# don't render raw escape bytes.
+if [[ "${TERM_PROGRAM:-}" == "iTerm.app" || "${LC_TERMINAL:-}" == "iTerm2" ]]; then
+  badge=$(printf '%s · ctx %d%% · c %s' "$PROFILE" "$PCT" "$CACHE_STR")
+  badge_b64=$(printf '%s' "$badge" | base64 | tr -d '\n')
+  # Brace group so a missing controlling tty (statusline runs as a child of
+  # Claude Code; on platforms where the captured stdio includes no tty, the
+  # redirect would otherwise leak "Device not configured" to stderr).
+  { printf '\e]1337;SetBadgeFormat=%s\a' "$badge_b64" >/dev/tty; } 2>/dev/null || true
+fi
