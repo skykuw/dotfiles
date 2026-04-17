@@ -27,12 +27,17 @@ PROFILE="${1:-unknown}"
 STATE_FILE="$HOME/.claude/.statusline_state"
 CACHE_TTL_S=300   # Anthropic default prompt-cache TTL (5 min)
 
+# ANSI color codes are deliberate (not 24-bit truecolor): the local terminal
+# theme — catppuccin mocha here — remaps them, so the statusline inherits the
+# active palette automatically without hard-coding hex values.
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
 RESET=$'\033[0m'
+RED=$'\033[1;31m'
 GREEN=$'\033[1;32m'
 YELLOW=$'\033[1;33m'
-RED=$'\033[1;31m'
+MAGENTA=$'\033[1;35m'
+CYAN=$'\033[1;36m'
 
 case "$PROFILE" in
   personal) TAG_COLOR="$GREEN" ;;
@@ -137,19 +142,20 @@ if [[ -n "$CWD" ]] && git -C "$CWD" --no-optional-locks rev-parse --git-dir >/de
        || true)
   if [[ -n "$BRANCH" ]]; then
     DIRTY=""
+    DIRTY=""
     if [[ -n "$(git -C "$CWD" --no-optional-locks status --porcelain 2>/dev/null | head -c1)" ]]; then
       DIRTY="*"
-      GIT_STR="${YELLOW}${ICON_GIT}${BRANCH}${DIRTY}${RESET}"
-    else
-      GIT_STR="${DIM}${ICON_GIT}${BRANCH}${RESET}"
     fi
+    # Branch always yellow (catppuccin yellow under mocha) — `*` carries the
+    # dirty signal so the color stays stable across clean/dirty transitions.
+    GIT_STR="${YELLOW}${ICON_GIT}${BRANCH}${DIRTY}${RESET}"
   fi
 fi
 
 # --- Pressure colors ---------------------------------------------------------
 if   (( PCT >= 80 )); then CTX_COLOR="$RED"
 elif (( PCT >= 50 )); then CTX_COLOR="$YELLOW"
-else                       CTX_COLOR="$DIM"
+else                       CTX_COLOR="$CYAN"
 fi
 
 rl_color() {
@@ -179,9 +185,9 @@ DUR_S=$((DUR_MS / 1000))
 DUR_H=$(printf '%dm%02ds' $((DUR_S / 60)) $((DUR_S % 60)))
 
 # --- Render ------------------------------------------------------------------
-line1="${TAG_COLOR}[${PROFILE}]${RESET} ${MODEL}"
+line1="${TAG_COLOR}[${PROFILE}]${RESET} ${MAGENTA}${MODEL}${RESET}"
 [[ -n "$GIT_STR" ]] && line1="${line1}  ${GIT_STR}"
-line1="${line1}  ${DIM}${COST_H}  ${DUR_H}${RESET}"
+line1="${line1}  ${GREEN}${COST_H}${RESET}  ${DIM}${DUR_H}${RESET}"
 
 line2="${CTX_COLOR}${CTX_LABEL}${USED_H}/${MAX_H} ${PCT}%${RESET}"
 line2="${line2}  ${CACHE_COLOR}${CACHE_LABEL}${CACHE_STR}${RESET}"
