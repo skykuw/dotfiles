@@ -12,6 +12,22 @@
 [pull]
 	rebase = false
 
+# git-delta: syntax-highlighted diffs and side-by-side merge view. No-op if
+# delta isn't installed — git falls back to less and the interactive filter
+# is bypassed.
+[core]
+	pager = delta
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	light = false
+
+[merge]
+	conflictstyle = zdiff3
+
 [include]
 	# Loaded last so its values override the tracked file. Missing files are
 	# silently ignored, so this is safe on a fresh machine before .local exists.
