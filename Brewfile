@@ -20,5 +20,8 @@ brew "zoxide"         # smart `cd` that learns frecent directories
 # GUI apps (macOS only — Brewfile is gated to Darwin in bootstrap.sh)
 cask "iterm2"
 
-# Nerd Font (provides the icon glyphs used by lualine/gitsigns/nvim-web-devicons)
+# Nerd Font — required by nvim's lualine/nvim-tree/web-devicons and used by
+# the Claude Code statusline icons (CLAUDE_STATUSLINE_ICONS=1 by default;
+# set to 0 to fall back to text labels). tmux (catppuccin v0.3.0) and zsh
+# (sonicradish) don't depend on it — they use standard Unicode glyphs.
 cask "font-jetbrains-mono-nerd-font"
