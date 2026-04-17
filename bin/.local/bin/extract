@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Extract any common archive type by extension. Usage: extract <archive>
+# Dispatches on suffix rather than sniffing magic bytes — fast and predictable.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: extract <archive>" >&2
+  exit 64
+fi
+
+f="$1"
+if [[ ! -f "$f" ]]; then
+  echo "extract: '$f' is not a file" >&2
+  exit 66
+fi
+
+case "$f" in
+  *.tar.bz2|*.tbz2)  tar -xjf  "$f" ;;
+  *.tar.gz|*.tgz)    tar -xzf  "$f" ;;
+  *.tar.xz|*.txz)    tar -xJf  "$f" ;;
+  *.tar.zst)         tar --use-compress-program=unzstd -xf "$f" ;;
+  *.tar)             tar -xf   "$f" ;;
+  *.bz2)             bunzip2   "$f" ;;
+  *.gz)              gunzip    "$f" ;;
+  *.xz)              unxz      "$f" ;;
+  *.zip|*.jar)       unzip     "$f" ;;
+  *.7z)              7z x      "$f" ;;
+  *.rar)             unrar x   "$f" ;;
+  *.Z)               uncompress "$f" ;;
+  *)
+    echo "extract: don't know how to handle '$f'" >&2
+    exit 65
+    ;;
+esac

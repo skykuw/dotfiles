@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# List tracked files sorted by last-commit time (newest first).
+# Useful for "what have I been touching lately" or for piping into fzf.
+
+set -euo pipefail
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "git-modified: not inside a git repo" >&2
+  exit 1
+fi
+
+# One `git log` per file would be O(N) processes — slow on big repos. Instead
+# walk the log once newest-first and print each path the first time we see it.
+git log --name-only --pretty=format:'%cI' --diff-filter=AM \
+  | awk '
+      NF == 0          { next }
+      /^[0-9]/         { ts = $0; next }
+                       { if (!seen[$0]++) printf "%s  %s\n", ts, $0 }
+  '

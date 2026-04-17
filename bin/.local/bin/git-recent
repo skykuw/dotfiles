@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Pick a recently-touched local branch via fzf and check it out.
+# Branches are sorted by last-commit time, newest first, with a relative-time
+# column so it's obvious which is which. With no fzf, prints the list.
+
+set -euo pipefail
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "git-recent: not inside a git repo" >&2
+  exit 1
+fi
+
+list() {
+  git for-each-ref --sort=-committerdate refs/heads/ \
+    --format='%(refname:short)|%(committerdate:relative)|%(subject)' \
+    | awk -F'|' '{ printf "%-40s %-20s %s\n", $1, $2, $3 }'
+}
+
+if ! command -v fzf >/dev/null 2>&1; then
+  list
+  exit 0
+fi
+
+choice=$(list | fzf --ansi --no-sort --reverse --height=40% \
+  --prompt='checkout ▸ ' --header='recent local branches')
+[[ -z "$choice" ]] && exit 0
+
+branch=$(awk '{print $1}' <<<"$choice")
+git checkout "$branch"

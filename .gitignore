@@ -13,6 +13,12 @@ Brewfile.lock.json
 .env.*
 !.env.example
 
+# The `bin` stow package uses a `.local/bin/` subtree so stow lands scripts in
+# ~/.local/bin/. That directory name collides with the *.local rule above —
+# re-include it (and its contents) explicitly.
+!bin/.local
+!bin/.local/**
+
 # Claude Code settings are machine-specific, seeded from templates/claude-settings/
 # on bootstrap. Never commit — the profile (personal vs work/<codename>) is private
 # per-machine state.
