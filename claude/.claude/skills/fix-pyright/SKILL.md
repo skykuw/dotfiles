@@ -1,0 +1,147 @@
+---
+name: fix-pyright
+description: Bulk-fix pyright errors across Python packages in a monorepo. Triages each error by rule name into tiers, then dispatches cost-tiered subagents — Haiku for mechanical fixes (missing imports, unused imports, missing type arguments, stale type:ignore comments), Sonnet for ambiguous type issues (return types, argument types, general type issues, incompatible overrides). Per-file verify-or-rollback via git plus a final whole-package sanity check. Use when the user invokes /fix-pyright, says "fix pyright errors in <package(s)>", "clean up pyright across these packages", or similar.
+---
+
+# fix-pyright
+
+## When to invoke
+
+- The user runs `/fix-pyright` with or without path arguments
+- The user asks to fix, clean up, or clear pyright errors across one or more packages
+- The user mentions a monorepo with pyright issues they want batched through
+
+Do **not** invoke for a single file with one or two errors — that's faster done inline.
+
+## Arguments
+
+- `<paths...>` — package directories to process. If none given, auto-discover: every top-level subdirectory of the current git root that contains `pyproject.toml` or `pyrightconfig.json`.
+- `--dry-run` — produce the triage report but make no edits and dispatch no subagents.
+- `--max-parallel N` — override the per-batch parallelism cap. Default: 4.
+
+## Preflight
+
+Before starting, confirm each tool is available:
+
+- `pyright` on PATH — if missing, tell the user "`pyright` not found. Install with `npm install -g pyright` (or equivalent) and re-run." and abort.
+- `jq` on PATH — bootstrap installs it, but verify. Abort with install hint if absent.
+- `git` on PATH and `cwd` inside a working tree — rollback depends on both.
+
+## Flow per package
+
+### 1. Baseline
+
+Run `~/.claude/skills/fix-pyright/scripts/pyright-report.sh <pkg>`. Capture stdout as the baseline JSON. Parse with `jq` into a map `{file_path: [error, ...]}` where each error carries `{line, column, rule, severity, message}`.
+
+Record the **per-file error count** — needed later for verification.
+
+### 2. Triage
+
+Load `~/.claude/skills/fix-pyright/triage.json`. For each error, look up its `rule` field and classify into one of four tiers:
+
+- **mechanical** — dispatched to a Haiku subagent
+- **ambiguous** — dispatched to a Sonnet subagent
+- **escalate** — kept for the orchestrator to surface to the user
+- **skip** — ignored entirely (e.g., tests, generated code flags the user configured)
+
+Rules not in the map default to **escalate** (never silently drop).
+
+Also skip files matching: `tests/**`, `test_*.py`, `*_test.py`, `conftest.py` — unless the user explicitly asked to include tests.
+
+### 3. Plan
+
+Group errors by `(file, tier)`. Each group becomes one subagent dispatch. Print the plan (per-package, per-tier counts) before dispatching. In `--dry-run` mode, stop here.
+
+### 4. Dispatch mechanical tier (Haiku)
+
+Use the Agent tool with `subagent_type: general-purpose` and `model: haiku`. Batch up to `--max-parallel` (default 4) at a time; launch each batch in a single assistant message with multiple tool uses so they run concurrently.
+
+Prompt template for each mechanical subagent:
+
+```
+Fix the pyright errors listed below in <file>.
+
+Rules for edits:
+- Make the minimal edit to resolve each error.
+- Do NOT add `# type: ignore` comments. If a fix requires one, skip that error and say so.
+- Do NOT reformat unrelated code.
+- Do NOT delete code as a fix unless pyright explicitly says it is unused AND you have verified (via Grep) that nothing else imports it.
+- After editing, re-read the file and confirm the edits are in place. Do not run pyright — the orchestrator will verify.
+
+Errors to fix:
+<list of {line, column, rule, message}>
+
+Return a short summary: which errors you fixed, which you skipped and why.
+```
+
+### 5. Verify each file
+
+After a subagent returns (don't wait for the whole batch), run
+`~/.claude/skills/fix-pyright/scripts/verify.sh <file> <baseline_count>`.
+
+- Exit 0 → keep edits, move on.
+- Exit 1 → `git checkout HEAD -- <file>`, move those errors to the `escalate` bucket, and log the rollback.
+- Exit 2 → tooling failure; abort the package.
+
+### 6. Dispatch ambiguous tier (Sonnet)
+
+Same pattern as the mechanical tier, with `model: sonnet`. Run after the mechanical tier because mechanical fixes often reduce the ambiguous tier's work (e.g., adding a missing import resolves a cascade of downstream errors).
+
+Prompt template is the same, except the rules paragraph is expanded:
+
+```
+These are ambiguous type issues. You may need to narrow a union, add a type guard, adjust a signature, or split a helper. Prefer the smallest semantically-correct fix. If the fix would require changes in other files, say so and skip — do NOT make cross-file edits.
+```
+
+### 7. Surface escalate bucket
+
+Print a grouped list of escalated errors (file + rule + message) and ask the user how to proceed: fix one interactively, skip all, or retry with a stronger model for a specific file.
+
+### 8. Whole-package sanity check
+
+After all tiers finish, run `pyright-report.sh <pkg>` once more over the whole package. Compare the new total error count to the baseline.
+
+- If new total ≤ baseline: report success.
+- If new total > baseline: some fix introduced a cross-file regression. List the files whose error count increased. Ask the user: keep everything, rollback the regressing files, or hand off the remaining errors for manual fix.
+
+### 9. Report
+
+Emit a concise summary:
+
+```
+Package pkgs/foo
+  baseline errors: 47
+  fixed (mechanical, Haiku):  18
+  fixed (ambiguous, Sonnet):  9
+  rolled back:                2
+  escalated to user:          4
+  unchanged (skip list):      14
+  final error count:          20  (Δ −27)
+```
+
+One table per package.
+
+## Safety rules
+
+- **Never auto-commit.** The user reviews and stages manually.
+- **Never add a fresh `# type: ignore`.** Only *remove* ones flagged by `reportUnnecessaryTypeIgnoreComment`.
+- **Never delete code as a type fix** unless pyright flagged it unused AND you verified no other file imports it.
+- **Never modify `tests/**`, `test_*.py`, `*_test.py`, `conftest.py`** by default. If the user explicitly asks to include tests, carry that flag through.
+- **Rollback uses `git checkout HEAD -- <file>`.** If the file was already staged before the skill ran, warn the user — rollback would lose their staged edits. Check `git diff --cached --name-only` before starting and abort if any target file is staged.
+
+## Cost posture
+
+| Tier | Model | Where it runs |
+|------|-------|---------------|
+| Orchestrator | profile default (opus on personal, sonnet on work) | main thread |
+| Mechanical | `haiku` via Agent tool override | subagent |
+| Ambiguous | `sonnet` via Agent tool override | subagent |
+| Escalate | profile default | orchestrator + user interaction |
+
+Each subagent prompt is short and self-contained — prompt caching stays effective across a run, so the per-subagent cost is dominated by the file content it reads. Capping parallelism to 4 keeps the token burst predictable for rate-limited machines.
+
+## Guardrails for the orchestrator
+
+- **If the mechanical rollback rate exceeds 50% in a single package**, pause and surface the observation to the user before continuing. Something is off (wrong triage, malformed prompts, or odd codebase conventions).
+- **If `pyright --outputjson` prints a banner or non-JSON output mixed with JSON**, the wrapper strips the banner. If parsing still fails, abort the package and report the raw output.
+- **If a subagent returns "I need to edit another file to fix this,"** don't accept the cross-file edit — escalate instead. Single-file is the contract.

@@ -1,0 +1,46 @@
+{
+  "_comment": "Maps pyright rule names (the `rule` field in --outputjson) to a fix tier. Rules not listed here default to 'escalate' — the orchestrator surfaces them rather than guessing. Extend as you learn your codebase's patterns.",
+  "mechanical": [
+    "reportMissingImports",
+    "reportUnusedImport",
+    "reportMissingTypeArgument",
+    "reportUnnecessaryTypeIgnoreComment",
+    "reportUnusedVariable",
+    "reportUnusedExpression",
+    "reportShadowedImports",
+    "reportWildcardImportFromLibrary"
+  ],
+  "ambiguous": [
+    "reportGeneralTypeIssues",
+    "reportReturnType",
+    "reportArgumentType",
+    "reportAssignmentType",
+    "reportIncompatibleMethodOverride",
+    "reportIncompatibleVariableOverride",
+    "reportMissingParameterType",
+    "reportMissingReturnType",
+    "reportOptionalMemberAccess",
+    "reportOptionalSubscript",
+    "reportOptionalIterable",
+    "reportOptionalContextManager",
+    "reportOptionalOperand",
+    "reportPossiblyUnbound",
+    "reportUnboundVariable",
+    "reportRedeclaration",
+    "reportCallIssue",
+    "reportAttributeAccessIssue",
+    "reportIndexIssue",
+    "reportOperatorIssue"
+  ],
+  "escalate": [
+    "reportInvalidTypeForm",
+    "reportMissingTypeStubFile",
+    "reportPrivateImportUsage",
+    "reportPrivateUsage",
+    "reportTypeCommentUsage",
+    "reportOverlappingOverload",
+    "reportInvalidTypeVarUse",
+    "reportSelfClsParameterName"
+  ],
+  "skip": []
+}
