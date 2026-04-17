@@ -1,11 +1,83 @@
 #!/usr/bin/env bash
 # Bootstrap dotfiles on a new machine (macOS or Linux).
 # Idempotent: safe to re-run.
+#
+# Usage: ./bootstrap.sh --profile=<profile>
+#   <profile> is a file under templates/claude-settings/ without the .json.template
+#   suffix. Discover available profiles with: ./bootstrap.sh --help
 
 set -euo pipefail
 
 DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DOTFILES_DIR"
+
+# --- Profile handling --------------------------------------------------------
+# The Claude Code profile controls which ~/.claude/settings.json template is
+# seeded. Required on every run (no default) so the choice is always explicit
+# in shell history and CI logs.
+
+list_profiles() {
+  if [[ -d "$DOTFILES_DIR/templates/claude-settings" ]]; then
+    (cd "$DOTFILES_DIR/templates/claude-settings" && \
+      find . -type f -name '*.json.template' \
+        | sed -e 's|^\./||' -e 's|\.json\.template$||' \
+        | sort)
+  fi
+}
+
+PROFILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile=*) PROFILE="${1#--profile=}"; shift ;;
+    --profile)   PROFILE="${2:-}"; shift 2 ;;
+    -h|--help)
+      cat <<EOF
+Usage: $0 --profile=<profile>
+
+Seeds ~/.claude/settings.json from templates/claude-settings/<profile>.json.template
+and sets up the rest of the dotfiles.
+
+Available profiles:
+$(list_profiles | sed 's/^/  - /')
+
+Examples:
+  $0 --profile=personal
+  $0 --profile=work/polaris
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 64
+      ;;
+  esac
+done
+
+if [[ -z "$PROFILE" ]]; then
+  {
+    echo "Error: --profile is required."
+    echo ""
+    echo "Available profiles:"
+    list_profiles | sed 's/^/  - /'
+    echo ""
+    echo "Example: $0 --profile=personal"
+  } >&2
+  exit 64
+fi
+
+CLAUDE_PROFILE_TEMPLATE="$DOTFILES_DIR/templates/claude-settings/${PROFILE}.json.template"
+if [[ ! -f "$CLAUDE_PROFILE_TEMPLATE" ]]; then
+  {
+    echo "Error: profile '$PROFILE' not found."
+    echo "Expected template at: $CLAUDE_PROFILE_TEMPLATE"
+    echo ""
+    echo "Available profiles:"
+    list_profiles | sed 's/^/  - /'
+  } >&2
+  exit 64
+fi
+
+echo "==> Using Claude profile: $PROFILE"
 
 # --- OS detection ------------------------------------------------------------
 
@@ -62,6 +134,8 @@ pkg_install           rg        ripgrep   ripgrep    ripgrep    ripgrep   ripgre
 # Note: on Debian/Ubuntu the `fd` binary is named `fdfind`. Symlink/alias if you want plain `fd`.
 pkg_install           fd        fd        fd-find    fd-find    fd        fd       fd
 pkg_install           tmux      tmux      tmux       tmux       tmux      tmux     tmux
+# Required by claude/.claude/statusline.sh for JSON parsing
+pkg_install           jq        jq        jq         jq         jq        jq       jq
 
 # --- Optional: Brewfile (macOS only, kept for parity if you add casks etc.) -
 
@@ -136,5 +210,24 @@ seed_template() {
 
 seed_template "$DOTFILES_DIR/templates/gitconfig.local.template"  "$HOME/.gitconfig.local"
 seed_template "$DOTFILES_DIR/templates/ssh-config.local.template" "$HOME/.ssh/config.local"
+
+# --- Seed Claude Code settings from the chosen profile ----------------------
+# Unlike gitconfig/ssh, this file gets 600 (read-write owner) because Claude
+# Code may rewrite it when the user changes settings via /config or the UI.
+# Clean up any dangling symlink from the older layout where settings.json was
+# part of the stowed `claude` package.
+
+if [[ -L "$HOME/.claude/settings.json" && ! -e "$HOME/.claude/settings.json" ]]; then
+  echo "==> Removing dangling symlink at ~/.claude/settings.json (legacy stowed layout)"
+  rm "$HOME/.claude/settings.json"
+fi
+
+if [[ ! -e "$HOME/.claude/settings.json" ]]; then
+  mkdir -p "$HOME/.claude"
+  install -m 600 "$CLAUDE_PROFILE_TEMPLATE" "$HOME/.claude/settings.json"
+  echo "==> Seeded ~/.claude/settings.json from profile '$PROFILE'"
+else
+  echo "==> ~/.claude/settings.json already exists; leaving it alone (delete it to re-seed)"
+fi
 
 echo "==> Done."

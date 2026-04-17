@@ -12,3 +12,8 @@ Brewfile.lock.json
 .env
 .env.*
 !.env.example
+
+# Claude Code settings are machine-specific, seeded from templates/claude-settings/
+# on bootstrap. Never commit — the profile (personal vs work/<codename>) is private
+# per-machine state.
+claude/.claude/settings.json

@@ -9,14 +9,16 @@ of `$HOME` and get symlinked into place.
 
 ```
 dotfiles/
-├── claude/                  # package: Claude Code config
+├── claude/                  # package: Claude Code shared config
 │   └── .claude/
 │       ├── CLAUDE.md        # global instructions for all projects
-│       ├── settings.json    # attribution, permissions, hooks, etc.
-│       └── skills/
+│       ├── statusline.sh    # status-bar renderer (profile, model, ctx, $)
+│       └── skills/          # shared across machines via git
 │           ├── code-review-author/
 │           ├── diagnose-codebase/
 │           └── pragmatic-programmer/
+│       # settings.json is NOT here — it's per-machine, seeded from
+│       # templates/claude-settings/ by bootstrap.sh based on --profile
 ├── nvim/                    # package: Neovim config (kickstart-style)
 │   └── .config/
 │       └── nvim/
@@ -39,9 +41,14 @@ dotfiles/
 │       └── config
 ├── templates/                       # placeholder configs seeded by bootstrap.sh
 │   ├── gitconfig.local.template     #   → seeded to ~/.gitconfig.local if missing
-│   └── ssh-config.local.template    #   → seeded to ~/.ssh/config.local if missing
+│   ├── ssh-config.local.template    #   → seeded to ~/.ssh/config.local if missing
+│   └── claude-settings/             # per-machine Claude Code profiles
+│       ├── personal.json.template   #   --profile=personal
+│       └── work/
+│           └── polaris.json.template #  --profile=work/polaris
 ├── Brewfile                 # tools required to bootstrap
-├── bootstrap.sh             # idempotent installer
+├── bootstrap.sh             # idempotent installer (takes --profile=<name>)
+├── claude-sync.sh           # pull + re-stow claude package (for consumer machines)
 └── README.md
 ```
 
@@ -124,17 +131,82 @@ by the `*.local` rule in `.gitignore`.
 To add a new bundle (e.g. zsh, git), create a sibling directory like `zsh/` with
 the file structure mirroring `$HOME`, then re-run `bootstrap.sh`.
 
+## Claude Code (claude package + profiles)
+
+The `claude/` package carries the **shared** parts of Claude Code config:
+`CLAUDE.md` and `skills/`. These are committed and travel to every machine.
+
+The per-machine parts — model choice, thinking/effort, permission scope —
+live in `~/.claude/settings.json`, which is **not** in the stowed tree.
+Instead, `bootstrap.sh --profile=<name>` seeds it from
+`templates/claude-settings/<name>.json.template` on a fresh machine.
+
+Two profiles ship today:
+
+- `personal` — Opus default, `alwaysThinkingEnabled: true`, `effortLevel: high`,
+  showing thinking summaries. Used on the machine where new skills are
+  developed.
+- `work/<codename>` — Sonnet default, thinking off, `effortLevel: medium`.
+  Cost-conscious for a machine with a daily spend cap. `work/polaris` is the
+  current entry. Add new codenames (stars) as new employers appear.
+
+Both profiles share the same lean read-only permission allowlist and a
+no-attribution override; differences are in model and cost levers.
+
+Each profile's `statusLine` calls `~/.claude/statusline.sh <profile>`, which
+renders a two-line status at the bottom of Claude Code:
+
+```
+[personal] Opus 4.7  main*  $0.04  1m32s
+ctx 15.5k/1.0M 2%  cache 3:20  5h 12%  7d 34%
+```
+
+Line 1 is identity + session totals; line 2 is pressure gauges.
+
+- **Tag** (`[personal]` / `[work/polaris]`) — green for personal, yellow for work.
+- **Git branch** — dim when clean, yellow with `*` when dirty. Omitted when cwd isn't a git repo.
+- **Context** — dim under 50%, yellow 50–80%, red ≥80%.
+- **Cache** — Anthropic prompt-cache TTL countdown (default 5 min). Dim above 1 min, yellow under 1 min, red `cold` once expired. Tracked via a sidecar file (`~/.claude/.statusline_state`) keyed on `session_id` + `total_api_duration_ms`, so refresh ticks don't fake a reset.
+- **Rate limits** — 5-hour and 7-day windows. Dim under 50%, yellow 50–80%, red ≥80%. The leading signal that the work budget is about to cut you off.
+
+`refreshInterval: 5` keeps the cache countdown ticking during idle. The
+script runs locally (no tokens). Requires `jq` (installed by bootstrap).
+
+**Install the profile on a fresh machine:**
+
+```bash
+./bootstrap.sh --profile=personal
+# or
+./bootstrap.sh --profile=work/polaris
+```
+
+`--profile=` is required on every run so the choice stays explicit in shell
+history. Run `./bootstrap.sh --help` to list available profiles. The seed is
+idempotent — it won't overwrite an existing `~/.claude/settings.json` (delete
+it first to re-seed).
+
+**Sync skills from the personal machine to work:**
+
+```bash
+./claude-sync.sh
+```
+
+Fast-forwards the dotfiles repo and re-stows the `claude` package. This is how
+new skills developed on personal flow to work once pushed to GitHub — no need
+to re-run the full bootstrap.
+
 ## Install on a new machine
 
 ```bash
 git clone <this-repo> ~/dotfiles
 cd ~/dotfiles
-./bootstrap.sh
+./bootstrap.sh --profile=personal      # or --profile=work/<codename>
 ```
 
 This installs `stow` (via Homebrew on macOS, or the system package manager on
-Linux — apt, dnf, yum, pacman, zypper, apk) and symlinks every package into
-`$HOME`. The `Brewfile` is only consumed when `brew` is present.
+Linux — apt, dnf, yum, pacman, zypper, apk), symlinks every package into
+`$HOME`, and seeds the per-machine Claude settings from the chosen profile.
+The `Brewfile` is only consumed when `brew` is present.
 
 ## Add or remove a package manually
 
