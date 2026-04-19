@@ -116,6 +116,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Context budget: aim for ≤10–15% of the context window per task. Baseline harness load on opus-4-7 (1M) already consumes ~5% before any work — your real headroom is ~5–10%. When the statusline turns yellow (PCT ≥10%), proactively: (1) save in-progress state to memory/ and PROJECT_STATE.md, (2) summarize next steps in the conversation, (3) ask the user to /clear and resume in a fresh session. Do not wait until red (≥15%).\"}}'",
+            "timeout": 2
+          }
+        ]
+      }
     ]
   }
 }
