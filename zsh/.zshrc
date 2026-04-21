@@ -27,7 +27,7 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh --cmd z)"
 
 # fzf: ctrl-r history, ctrl-t file picker, alt-c dir picker. Requires fzf >= 0.48.
-command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
+command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh 2>/dev/null)"
 
 # eza: replace `ls` with a git-aware, group-directories-first listing.
 command -v eza >/dev/null 2>&1 && alias ls='eza --group-directories-first'

@@ -142,7 +142,6 @@ if [[ -n "$CWD" ]] && git -C "$CWD" --no-optional-locks rev-parse --git-dir >/de
        || true)
   if [[ -n "$BRANCH" ]]; then
     DIRTY=""
-    DIRTY=""
     if [[ -n "$(git -C "$CWD" --no-optional-locks status --porcelain 2>/dev/null | head -c1)" ]]; then
       DIRTY="*"
     fi

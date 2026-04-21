@@ -11,7 +11,7 @@ fi
 
 # One `git log` per file would be O(N) processes — slow on big repos. Instead
 # walk the log once newest-first and print each path the first time we see it.
-git log --name-only --pretty=format:'%cI' --diff-filter=AM \
+git log --name-only --pretty=format:'%cI' --diff-filter=AMR \
   | awk '
       NF == 0          { next }
       /^[0-9]/         { ts = $0; next }
