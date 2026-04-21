@@ -149,6 +149,34 @@ fi
 # Each top-level directory (other than these) is a stow package.
 EXCLUDES=(.git Brewfile Brewfile.lock.json README.md bootstrap.sh .gitignore templates)
 
+# Pre-stow conflict check: abort early with a readable list of real files on
+# this machine that would collide with the package. A symlink already pointing
+# into this repo (idempotent re-run) is not a conflict.
+check_stow_conflicts() {
+  local pkg="$1"
+  local src_root="$DOTFILES_DIR/$pkg"
+  local conflicts=()
+  while IFS= read -r -d '' src; do
+    local rel="${src#"$src_root"/}"
+    local dest="$HOME/$rel"
+    [[ -e "$dest" || -L "$dest" ]] || continue
+    [[ "$dest" -ef "$src" ]] && continue   # symlink already points to this src
+    conflicts+=("$dest")
+  done < <(find "$src_root" -type f -print0)
+
+  if (( ${#conflicts[@]} > 0 )); then
+    {
+      echo ""
+      echo "Error: stow package '$pkg' would conflict with existing files:"
+      printf '  %s\n' "${conflicts[@]}"
+      echo ""
+      echo "These files exist on this machine and are not already managed by this repo."
+      echo "Back them up or remove them, then re-run bootstrap."
+    } >&2
+    exit 1
+  fi
+}
+
 echo "==> Stowing packages into $HOME"
 for pkg in */; do
   pkg="${pkg%/}"
@@ -157,8 +185,21 @@ for pkg in */; do
     [[ "$pkg" == "$ex" ]] && skip=true && break
   done
   $skip && continue
+
+  stow_opts=(--restow --target="$HOME")
+  # claude: --no-folding forces per-leaf symlinks. Without it, stow collapses
+  # an empty target like ~/.claude/skills/ into a directory symlink pointing
+  # into this repo — any skill the user adds later would land inside dotfiles
+  # and start showing up in `git status`. Also runs a conflict pre-check so
+  # merging with a pre-existing ~/.claude/ on a work machine fails loudly
+  # rather than mid-stow.
+  if [[ "$pkg" == "claude" ]]; then
+    check_stow_conflicts "$pkg"
+    stow_opts+=(--no-folding)
+  fi
+
   echo "  -> $pkg"
-  stow --restow --target="$HOME" "$pkg"
+  stow "${stow_opts[@]}" "$pkg"
 done
 
 # --- Install TPM (tmux plugin manager) and plugins --------------------------
