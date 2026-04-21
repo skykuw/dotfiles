@@ -18,6 +18,8 @@ Do **not** invoke for a single file with one or two errors — that's faster don
 - `<paths...>` — package directories to process. If none given, auto-discover: every top-level subdirectory of the current git root that contains `pyproject.toml` or `pyrightconfig.json`.
 - `--dry-run` — produce the triage report but make no edits and dispatch no subagents.
 - `--max-parallel N` — override the per-batch parallelism cap. Default: 4.
+- `--limit N` — process only the top-N files (by fixable-error count) per package. Report the remainder as "not processed this run; re-run to continue". Use this to cap run cost on the budget-capped work profile.
+- `--include-tests` — do not skip test files. Off by default.
 
 ## Preflight
 
@@ -44,6 +46,8 @@ Read the TSV into memory. Record the **per-file error count** (count of rows gro
 ### 2. Plan
 
 Group TSV rows by `(file, tier)`. Each group becomes one subagent dispatch. Print a compact plan (per-package, per-tier row counts — not a per-file listing). In `--dry-run` mode, stop here.
+
+**If `--limit N` is set**: before planning, count **fixable** rows per file (mechanical + ambiguous only, excluding escalate). Sort files descending by that count, keep only the top N, and drop all TSV rows for files outside the top N. Carry the dropped files' counts into the final report as "deferred".
 
 ### 3. Dispatch mechanical tier (Haiku)
 
@@ -75,18 +79,32 @@ SKIPPED: <semicolon-separated line=reason pairs, or "none">
 
 Example reply: `FIXED: 3,7,12` then `SKIPPED: 9=needs-cross-file-edit; 15=requires-type-ignore`.
 
-### 4. Verify each file
+### 4. Verify each batch
 
-After a subagent returns (don't wait for the whole batch), run
-`~/.claude/skills/fix-pyright/scripts/verify.sh <file> <baseline_count>`.
+After a **batch** of subagents returns (wait for the whole batch, not each individual subagent — one pyright invocation per batch is much cheaper than one per file), feed `verify-batch.sh` a TSV on stdin with one `<baseline_count>\t<file>` row per file edited in the batch:
 
-- Exit 0 → keep edits, move on. Parse the subagent's `SKIPPED:` line and append those lines to the escalate bucket, keyed by reason.
-- Exit 1 → `git checkout HEAD -- <file>`, move that file's remaining errors to the `escalate` bucket, and log the rollback.
-- Exit 2 → tooling failure; abort the package.
+```
+printf '%d\t%s\n' <baseline_1> <file_1> <baseline_2> <file_2> ... \
+  | ~/.claude/skills/fix-pyright/scripts/verify-batch.sh
+```
 
-### 5. Dispatch ambiguous tier (Sonnet)
+The script emits one TSV row per file: `<status>\t<file>` where status is `ok`, `regress`, or `tool-fail`.
 
-Same pattern as the mechanical tier, with `model: sonnet`. Run after the mechanical tier because mechanical fixes often reduce the ambiguous tier's work (e.g., adding a missing import resolves a cascade of downstream errors).
+- `ok` → keep edits. Parse the subagent's `SKIPPED:` line and append those lines to the escalate bucket, keyed by reason.
+- `regress` → `git checkout HEAD -- <file>`, move that file's remaining errors to the `escalate` bucket, and log the rollback.
+- `tool-fail` → abort the package.
+
+If the script itself exits 2 (batch-level tooling failure), abort the package.
+
+### 5. Re-baseline before the ambiguous tier
+
+Before dispatching the ambiguous tier, re-run `triage-report.sh <pkg>` and read the fresh TSV. Mechanical fixes (missing imports especially) cascade-resolve many ambiguous errors; dispatching against the stale baseline would queue subagents for errors that no longer exist. The re-baseline cost is one pyright run; it typically saves several subagent dispatches.
+
+Use the fresh TSV's ambiguous rows as the input to step 6. Use the fresh TSV's per-file error counts as the baseline for the ambiguous-tier batch verifies.
+
+### 6. Dispatch ambiguous tier (Sonnet)
+
+Same pattern as the mechanical tier, with `model: sonnet`.
 
 Ambiguous subagents **do** need the pyright message — include it in the error list.
 
@@ -98,19 +116,20 @@ Prompt template is the same, except:
    L22:8 reportOptionalMemberAccess — "x" is possibly None
    ```
 3. The reply format is unchanged (`FIXED:`/`SKIPPED:` two-line bounded).
+4. Verify each batch with `verify-batch.sh` as in step 4.
 
-### 6. Surface escalate bucket
+### 7. Surface escalate bucket
 
 Print a grouped list of escalated errors (file + rule + message) and ask the user how to proceed: fix one interactively, skip all, or retry with a stronger model for a specific file.
 
-### 7. Whole-package sanity check
+### 8. Whole-package sanity check
 
 After all tiers finish, run `triage-report.sh <pkg>` once more over the whole package. Compare the new total row count (across all tiers) to the baseline.
 
 - If new total ≤ baseline: report success.
 - If new total > baseline: some fix introduced a cross-file regression. List the files whose row count increased. Ask the user: keep everything, rollback the regressing files, or hand off the remaining errors for manual fix.
 
-### 8. Report
+### 9. Report
 
 Emit a concise summary:
 
@@ -123,6 +142,12 @@ Package pkgs/foo
   escalated to user:          4
   unchanged (skip list):      14
   final error count:          20  (Δ −27)
+```
+
+If `--limit N` was set and files were deferred, add a trailing line:
+
+```
+  deferred (--limit): 7 files, ~31 fixable errors — re-run to continue
 ```
 
 One table per package.
