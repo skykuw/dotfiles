@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# claude-grep — search text content across Claude Code session transcripts.
+#
+# Walks ~/.claude/projects/*/*.jsonl (main sessions only; subagent sidechains
+# under */subagents/ are excluded), extracts text from user and assistant
+# turns, and prints matches with session metadata. Pipe the path (4th TSV
+# field) into claude-show for context.
+#
+# Usage:
+#   claude-grep <pattern>                  # ERE regex, case-sensitive
+#   claude-grep -i <pattern>               # case-insensitive
+#   claude-grep -F <pattern>               # fixed string, no regex
+#   claude-grep --role user <pattern>      # only user turns
+#   claude-grep --role assistant <pat>     # only assistant turns
+#
+#   claude-grep 'statusline' | less -R
+#   claude-grep -F 'SC2086' | awk -F$'\t' '{print $4}' | sort -u
+#
+# Deps: jq, grep. No fzf dependency (this is the bulk-search tool).
+
+set -uo pipefail
+
+PROJECTS_DIR="$HOME/.claude/projects"
+[[ -d "$PROJECTS_DIR" ]] || { echo "No $PROJECTS_DIR" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq not installed" >&2; exit 1; }
+
+GREP_FLAGS=()
+ROLE_FILTER=""
+PATTERN=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i)           GREP_FLAGS+=(-i); shift ;;
+    -F)           GREP_FLAGS+=(-F); shift ;;
+    --role)       ROLE_FILTER="$2"; shift 2 ;;
+    -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --)           shift; PATTERN="${1:-}"; break ;;
+    -*)           echo "unknown flag: $1" >&2; exit 2 ;;
+    *)            PATTERN="$1"; shift; break ;;
+  esac
+done
+
+[[ -z "$PATTERN" ]] && { echo "usage: claude-grep [-i|-F] [--role user|assistant] <pattern>" >&2; exit 2; }
+case "$ROLE_FILTER" in ""|user|assistant) ;; *) echo "--role must be user or assistant" >&2; exit 2 ;; esac
+
+# ANSI for terminal output — suppress if stdout isn't a tty so piping stays clean.
+if [[ -t 1 ]]; then
+  C_DATE=$'\033[2m'
+  C_PROJ=$'\033[1;34m'
+  C_USER=$'\033[1;36m'
+  C_ASSIST=$'\033[0m'
+  C_PATH=$'\033[2m'
+  C_RESET=$'\033[0m'
+else
+  C_DATE=; C_PROJ=; C_USER=; C_ASSIST=; C_PATH=; C_RESET=
+fi
+
+# Pick grep invocation up-front. -F and -E are mutually exclusive, so the
+# basic flag is determined by whether -F was passed; -i stacks on either.
+is_fixed=0
+case_flag=""
+for flag in "${GREP_FLAGS[@]+"${GREP_FLAGS[@]}"}"; do
+  [[ "$flag" == "-F" ]] && is_fixed=1
+  [[ "$flag" == "-i" ]] && case_flag="-i"
+done
+if (( is_fixed )); then
+  grep_mode=(-F)
+else
+  grep_mode=(-E)
+fi
+[[ -n "$case_flag" ]] && grep_mode+=("$case_flag")
+
+# Extract "<role>\t<excerpt>" from each text-bearing turn in a transcript.
+# User turns: string content only (tool_results are arrays, skipped).
+# Assistant turns: concat all text blocks from the content array.
+# Collapse newlines/tabs so grep output stays one-line.
+extract_turns() {
+  local f="$1" role_jq=""
+  case "$ROLE_FILTER" in
+    user)      role_jq='select(.type == "user")' ;;
+    assistant) role_jq='select(.type == "assistant")' ;;
+    *)         role_jq='select(.type == "user" or .type == "assistant")' ;;
+  esac
+  jq -r --arg f "$f" "
+    $role_jq
+    | . as \$rec
+    | (if .type == \"user\" then
+         (.message.content | select(type == \"string\") | select(test(\"^<(local-command-|command-|system-reminder)\") | not))
+       else
+         (.message.content // [] | map(select(.type == \"text\") | .text) | join(\" \"))
+       end) as \$text
+    | select(\$text != \"\" and \$text != null)
+    | [\$rec.type, (\$rec.timestamp // \"\"), (\$text | gsub(\"[\\n\\t]\"; \" \"))]
+    | join(\"\")
+  " "$f" 2>/dev/null
+}
+
+# cwd lookup cache — the first record in each file carries .cwd.
+session_cwd() {
+  jq -r 'select(.cwd) | .cwd' "$1" 2>/dev/null | head -1
+}
+
+# Walk transcripts and emit one TSV line per match:
+#   <date_disp>\t<project>\t<role>\t<path>\t<excerpt>
+# Then render each line in a readable two-line block on a tty.
+find "$PROJECTS_DIR" -maxdepth 2 -name '*.jsonl' 2>/dev/null | while IFS= read -r f; do
+  cwd=$(session_cwd "$f")
+  project="${cwd##*/}"; [[ -z "$project" ]] && project=$(basename "$(dirname "$f")")
+
+  extract_turns "$f" | while IFS=$'\x1f' read -r role ts excerpt; do
+    if ! grep -q "${grep_mode[@]}" -- "$PATTERN" <<<"$excerpt"; then continue; fi
+    # Parse ISO ts → local "Apr 21 17:56".
+    date_disp=""
+    if [[ -n "$ts" ]]; then
+      ts_clean="${ts%.*}"; ts_clean="${ts_clean%Z}"
+      epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$ts_clean" "+%s" 2>/dev/null \
+           || date -u -d "$ts" "+%s" 2>/dev/null || echo "")
+      [[ -n "$epoch" ]] && date_disp=$(date -r "$epoch" "+%b %d %H:%M" 2>/dev/null \
+                                   || date -d "@$epoch" "+%b %d %H:%M" 2>/dev/null)
+    fi
+    # Highlight the pattern in the excerpt (only on tty).
+    if [[ -t 1 ]]; then
+      highlighted=$(GREP_COLOR='01;33' grep --color=always "${grep_mode[@]}" -- "$PATTERN" <<<"$excerpt" || echo "$excerpt")
+    else
+      highlighted="$excerpt"
+    fi
+    # Role-colored label
+    case "$role" in
+      user)      rl_c="$C_USER" ;;
+      assistant) rl_c="$C_ASSIST" ;;
+      *)         rl_c="" ;;
+    esac
+    printf '%s%-12s%s  %s%-22s%s  %s%-9s%s  %s\n        %s%s%s\n' \
+      "$C_DATE" "$date_disp" "$C_RESET" \
+      "$C_PROJ" "$project" "$C_RESET" \
+      "$rl_c" "$role" "$C_RESET" \
+      "$highlighted" \
+      "$C_PATH" "$f" "$C_RESET"
+  done
+done
