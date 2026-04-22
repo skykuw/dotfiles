@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# claude-show — pretty-print a Claude Code session transcript turn-by-turn.
+#
+# Reads a transcript path from $1 or stdin (one path per line) and renders
+# user / assistant turns as prose. Tool calls are collapsed to one-liners so
+# the conversation stays readable.
+#
+# Usage:
+#   claude-show <path>
+#   claude-sessions | claude-show
+#   claude-sessions --here | claude-show | less -R
+#
+# Deps: jq. Pipes through less -R when stdout is a tty (unless --no-pager).
+
+set -uo pipefail
+command -v jq >/dev/null 2>&1 || { echo "jq not installed" >&2; exit 1; }
+
+NO_PAGER=0
+PATHS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-pager) NO_PAGER=1; shift ;;
+    -h|--help)  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*)         echo "unknown flag: $1" >&2; exit 2 ;;
+    *)          PATHS+=("$1"); shift ;;
+  esac
+done
+
+# If no path args, read from stdin. Skip blank lines.
+if (( ${#PATHS[@]} == 0 )); then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && PATHS+=("$line")
+  done
+fi
+(( ${#PATHS[@]} == 0 )) && { echo "no transcript path supplied" >&2; exit 2; }
+
+# ANSI colors — always emit; less -R will honor, plain terminals will show
+# codes only if piped to something that doesn't interpret them. Users pass
+# --no-pager + redirect to strip codes; use `| cat` for a minimal stripper.
+C_USER=$'\033[1;36m'
+C_ROLE=$'\033[1m'
+C_TOOL=$'\033[2m'
+C_DIM=$'\033[2m'
+C_RESET=$'\033[0m'
+
+render_one() {
+  local f="$1"
+  [[ -r "$f" ]] || { printf '%s(unreadable: %s)%s\n' "$C_DIM" "$f" "$C_RESET"; return; }
+
+  printf '\n%s════  %s  ════%s\n\n' "$C_ROLE" "$f" "$C_RESET"
+
+  jq -r '
+    # Normalize every record into a flat list of "render-items" with a type.
+    # User string content  → {kind:"user-text", ts, text}
+    # User tool-result arr → {kind:"tool-result", ts, text}
+    # Assistant text block → {kind:"assistant-text", ts, text}
+    # Assistant tool-use   → {kind:"tool-use", ts, name, input}
+    select(.type == "user" or .type == "assistant")
+    | . as $r
+    | if .type == "user" then
+        if (.message.content | type) == "string" then
+          [{ kind: "user-text", ts: ($r.timestamp // ""), text: .message.content }]
+        else
+          [ .message.content[]?
+            | select(.type == "tool_result")
+            | { kind: "tool-result",
+                ts: ($r.timestamp // ""),
+                text: (if (.content | type) == "string" then .content
+                       else (.content // [] | map(.text // "") | join(" ")) end) } ]
+        end
+      else
+        [ .message.content[]?
+          | if .type == "text" then
+              { kind: "assistant-text", ts: ($r.timestamp // ""), text: .text }
+            elif .type == "tool_use" then
+              { kind: "tool-use", ts: ($r.timestamp // ""),
+                name: .name,
+                input: (.input | tostring) }
+            else empty end ]
+      end
+    | .[]
+    | [.kind, (.ts // ""), (.name // ""), ((.text // .input) | gsub("\r"; ""))]
+    | join("")
+  ' "$f" 2>/dev/null | while IFS=$'\x1f' read -r kind ts name body; do
+    # ISO → local "Apr 21 17:56"
+    ts_disp=""
+    if [[ -n "$ts" ]]; then
+      ts_clean="${ts%.*}"; ts_clean="${ts_clean%Z}"
+      epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$ts_clean" "+%s" 2>/dev/null \
+           || date -u -d "$ts" "+%s" 2>/dev/null || echo "")
+      [[ -n "$epoch" ]] && ts_disp=$(date -r "$epoch" "+%b %d %H:%M" 2>/dev/null \
+                                  || date -d "@$epoch" "+%b %d %H:%M" 2>/dev/null)
+    fi
+
+    # jq @tsv preserves embedded newlines/tabs in strings as literal \n / \t
+    # (two chars each). Convert them back to real control characters so the
+    # rendered text wraps and indents naturally.
+    body="${body//\\n/$'\n'}"
+    body="${body//\\t/$'\t'}"
+
+    case "$kind" in
+      user-text)
+        printf '%s── %s  user ──%s\n%s\n\n' "$C_USER" "$ts_disp" "$C_RESET" "$body"
+        ;;
+      assistant-text)
+        printf '%s── %s  assistant ──%s\n%s\n\n' "$C_ROLE" "$ts_disp" "$C_RESET" "$body"
+        ;;
+      tool-use)
+        # Truncate the tool input so tool_use doesn't dominate the page.
+        local short="$body"
+        (( ${#short} > 200 )) && short="${short:0:197}…"
+        printf '  %s[tool_use: %s]%s %s\n' "$C_TOOL" "$name" "$C_RESET" "$short"
+        ;;
+      tool-result)
+        local short="$body"
+        (( ${#short} > 200 )) && short="${short:0:197}…"
+        printf '  %s[tool_result]%s %s\n' "$C_TOOL" "$C_RESET" "$short"
+        ;;
+    esac
+  done
+}
+
+render_all() {
+  for p in "${PATHS[@]}"; do
+    render_one "$p"
+  done
+}
+
+if [[ -t 1 && $NO_PAGER -eq 0 ]] && command -v less >/dev/null 2>&1; then
+  render_all | less -R
+else
+  render_all
+fi
