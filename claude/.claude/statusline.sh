@@ -24,7 +24,11 @@
 set -uo pipefail
 
 PROFILE="${1:-unknown}"
-STATE_FILE="$HOME/.claude/.statusline_state"
+# Cache TTL state is per-session: multiple concurrent Claude Code sessions
+# would otherwise clobber each other's state, making every tick look like a
+# session mismatch and pinning the countdown at 5:00. Actual path is set
+# after SESSION_ID is parsed below.
+STATE_FILE=""
 CACHE_TTL_S=300   # Anthropic default prompt-cache TTL (5 min)
 
 # ANSI color codes are deliberate (not 24-bit truecolor): the local terminal
@@ -36,6 +40,7 @@ RESET=$'\033[0m'
 RED=$'\033[1;31m'
 GREEN=$'\033[1;32m'
 YELLOW=$'\033[1;33m'
+BLUE=$'\033[1;34m'
 MAGENTA=$'\033[1;35m'
 CYAN=$'\033[1;36m'
 
@@ -56,10 +61,12 @@ if [[ "${CLAUDE_STATUSLINE_ICONS:-1}" == "1" ]]; then
   # which doesn't expand \u in $'...'. Each glyph is from a nerd-font (any
   # patched font set; JetBrainsMono Nerd Font is the one we install).
   ICON_GIT=$'\xee\x9c\xa5 '            # U+E725  nf-dev-git_branch
+  ICON_DIR=$'\xef\x81\xbb '            # U+F07B  nf-fa-folder
   CTX_LABEL=$'\xef\x82\x80  '          # U+F080  nf-fa-bar_chart
   CACHE_LABEL=$'\xef\x80\x97  '        # U+F017  nf-fa-clock_o
 else
   ICON_GIT=''
+  ICON_DIR=''
   CTX_LABEL='ctx '
   CACHE_LABEL='cache '
 fi
@@ -75,7 +82,8 @@ INPUT="$(cat)"
 # Single jq pass → TSV → bash read. IFS=$'\t' keeps model display names with
 # spaces intact.
 IFS=$'\t' read -r \
-  SESSION_ID MODEL CWD PCT USED MAX COST DUR_MS API_DUR_MS RL5 RL7 \
+  SESSION_ID MODEL CWD PCT USED MAX COST DUR_MS API_DUR_MS RL5 RL7 RL5_RESETS RL7_RESETS \
+  CACHE_READ CACHE_CREATE INPUT_TOK LINES_ADD LINES_DEL \
   <<<"$(jq -r '[
     .session_id // "",
     .model.display_name // "?",
@@ -87,7 +95,14 @@ IFS=$'\t' read -r \
     (.cost.total_duration_ms // 0),
     (.cost.total_api_duration_ms // 0),
     (.rate_limits.five_hour.used_percentage // 0),
-    (.rate_limits.seven_day.used_percentage // 0)
+    (.rate_limits.seven_day.used_percentage // 0),
+    (.rate_limits.five_hour.resets_at // ""),
+    (.rate_limits.seven_day.resets_at // ""),
+    (.context_window.current_usage.cache_read_input_tokens // 0),
+    (.context_window.current_usage.cache_creation_input_tokens // 0),
+    (.context_window.current_usage.input_tokens // 0),
+    (.cost.total_lines_added // 0),
+    (.cost.total_lines_removed // 0)
   ] | @tsv' <<<"$INPUT" 2>/dev/null
 )"
 
@@ -98,6 +113,11 @@ DUR_MS="${DUR_MS%%.*}"; DUR_MS="${DUR_MS:-0}"
 API_DUR_MS="${API_DUR_MS%%.*}"; API_DUR_MS="${API_DUR_MS:-0}"
 RL5="${RL5%%.*}"; RL5="${RL5:-0}"
 RL7="${RL7%%.*}"; RL7="${RL7:-0}"
+CACHE_READ="${CACHE_READ%%.*}"; CACHE_READ="${CACHE_READ:-0}"
+CACHE_CREATE="${CACHE_CREATE%%.*}"; CACHE_CREATE="${CACHE_CREATE:-0}"
+INPUT_TOK="${INPUT_TOK%%.*}"; INPUT_TOK="${INPUT_TOK:-0}"
+LINES_ADD="${LINES_ADD%%.*}"; LINES_ADD="${LINES_ADD:-0}"
+LINES_DEL="${LINES_DEL%%.*}"; LINES_DEL="${LINES_DEL:-0}"
 MODEL="${MODEL:-?}"
 COST="${COST:-0}"
 
@@ -108,27 +128,41 @@ COST="${COST:-0}"
 # calls within a session — when it changes, a new API call happened.
 
 NOW=$(date +%s)
-PREV_SESSION=""; PREV_API_DUR=-1; PREV_TS="$NOW"
+STATE_FILE="$HOME/.claude/.statusline_state.${SESSION_ID:-unknown}"
+PREV_API_DUR=-1; PREV_TS="$NOW"
 if [[ -r "$STATE_FILE" ]]; then
-  read -r PREV_SESSION PREV_API_DUR PREV_TS < "$STATE_FILE" || true
+  read -r PREV_API_DUR PREV_TS < "$STATE_FILE" || true
 fi
 
-if [[ "$SESSION_ID" != "$PREV_SESSION" ]] || [[ "$API_DUR_MS" != "$PREV_API_DUR" ]]; then
+if [[ "$API_DUR_MS" != "$PREV_API_DUR" ]]; then
   LAST_API_TS="$NOW"
-  printf '%s %s %s\n' "$SESSION_ID" "$API_DUR_MS" "$NOW" >"$STATE_FILE" 2>/dev/null || true
+  printf '%s %s\n' "$API_DUR_MS" "$NOW" >"$STATE_FILE" 2>/dev/null || true
 else
   LAST_API_TS="$PREV_TS"
 fi
 
+# Opportunistic cleanup: drop per-session state files older than 1 day so the
+# .claude dir doesn't accumulate one entry per historical session forever.
+# Runs at most every 10 min (gated by age of a sentinel file) to keep the
+# 5-second tick cheap.
+CLEANUP_SENTINEL="$HOME/.claude/.statusline_state.cleanup"
+if [[ ! -f "$CLEANUP_SENTINEL" ]] || (( NOW - $(stat -f %m "$CLEANUP_SENTINEL" 2>/dev/null || stat -c %Y "$CLEANUP_SENTINEL" 2>/dev/null || echo 0) > 600 )); then
+  find "$HOME/.claude" -maxdepth 1 -name '.statusline_state.*' -type f -mtime +1 -delete 2>/dev/null || true
+  : > "$CLEANUP_SENTINEL" 2>/dev/null || true
+fi
+
 REMAINING=$((CACHE_TTL_S - (NOW - LAST_API_TS)))
-if (( REMAINING > 60 )); then
-  CACHE_COLOR="$DIM"
-  CACHE_STR=$(printf '%d:%02d' $((REMAINING / 60)) $((REMAINING % 60)))
-elif (( REMAINING > 0 )); then
-  CACHE_COLOR="$YELLOW"
+# Same 4-tier ramp as rate limits (green→cyan→yellow→red). Cache is 5 min
+# total, so the warn band covers the last minute when you can still squeeze
+# in a cache-hitting turn; below that it's already effectively cold.
+if   (( REMAINING >= 180 )); then CACHE_COLOR="$GREEN"
+elif (( REMAINING >=  60 )); then CACHE_COLOR="$CYAN"
+elif (( REMAINING >    0 )); then CACHE_COLOR="$YELLOW"
+else                              CACHE_COLOR="$RED"
+fi
+if (( REMAINING > 0 )); then
   CACHE_STR=$(printf '%d:%02d' $((REMAINING / 60)) $((REMAINING % 60)))
 else
-  CACHE_COLOR="$RED"
   CACHE_STR="cold"
 fi
 
@@ -161,14 +195,53 @@ else                       CTX_COLOR="$CYAN"
 fi
 
 rl_color() {
+  # 4-tier: green <30, cyan 30–59, yellow 60–79, red ≥80. Mirrors the cache
+  # timer ramp so both bottom-line signals use the same visual language.
   local v="$1"
   if   (( v >= 80 )); then printf '%s' "$RED"
-  elif (( v >= 50 )); then printf '%s' "$YELLOW"
-  else                     printf '%s' "$DIM"
+  elif (( v >= 60 )); then printf '%s' "$YELLOW"
+  elif (( v >= 30 )); then printf '%s' "$CYAN"
+  else                     printf '%s' "$GREEN"
   fi
 }
 RL5_COLOR=$(rl_color "$RL5")
 RL7_COLOR=$(rl_color "$RL7")
+
+# Compact duration until a reset timestamp: 2d3h / 4h23m / 45m / 30s.
+# Empty for missing, unparseable, or past timestamps — caller falls back to
+# pct-only rendering. Accepts either Unix epoch seconds (what Claude Code
+# actually sends as of 2.1.116) or ISO 8601 (per the 2.1.80 changelog, in
+# case the format changes back).
+fmt_remaining() {
+  local raw="$1"
+  [[ -z "$raw" ]] && return 0
+  local epoch=""
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then
+    epoch="$raw"
+  else
+    # Strip fractional seconds (".123") and trailing Z; BSD date -j -f can't
+    # parse them with the format below.
+    local clean="${raw%.*}"
+    clean="${clean%Z}"
+    if ! epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "$clean" "+%s" 2>/dev/null); then
+      epoch=$(date -u -d "$raw" "+%s" 2>/dev/null)
+    fi
+  fi
+  [[ -z "$epoch" ]] && return 0
+  local delta=$(( epoch - NOW ))
+  (( delta <= 0 )) && return 0
+  if   (( delta >= 86400 )); then
+    printf '%dd%dh' $(( delta / 86400 )) $(( (delta % 86400) / 3600 ))
+  elif (( delta >= 3600 )); then
+    printf '%dh%dm' $(( delta / 3600 )) $(( (delta % 3600) / 60 ))
+  elif (( delta >= 60 )); then
+    printf '%dm' $(( delta / 60 ))
+  else
+    printf '%ds' "$delta"
+  fi
+}
+RL5_LEFT=$(fmt_remaining "$RL5_RESETS")
+RL7_LEFT=$(fmt_remaining "$RL7_RESETS")
 
 # --- Humanize ----------------------------------------------------------------
 human_k() {
@@ -186,15 +259,59 @@ COST_H=$(awk -v c="$COST" 'BEGIN{ printf "~$%.2f", c+0 }')
 DUR_S=$((DUR_MS / 1000))
 DUR_H=$(printf '%dm%02ds' $((DUR_S / 60)) $((DUR_S % 60)))
 
+# Cache hit ratio for the current turn: how much of the model's input was
+# served from the prompt cache vs. built fresh / sent as new input. High is
+# good (cheap turn). Empty when the denominator is 0 (no input yet).
+CACHE_HIT_STR=""
+CACHE_HIT_DENOM=$(( CACHE_READ + CACHE_CREATE + INPUT_TOK ))
+if (( CACHE_HIT_DENOM > 0 )); then
+  CACHE_HIT_STR=$(( CACHE_READ * 100 / CACHE_HIT_DENOM ))"%"
+fi
+
+# Session churn: +added/-removed, green/red like git diff --stat. Suppressed
+# when nothing has been edited yet so a fresh session stays clean.
+LINES_STR=""
+if (( LINES_ADD > 0 || LINES_DEL > 0 )); then
+  LINES_STR="${GREEN}+${LINES_ADD}${RESET}${DIM}/${RESET}${RED}-${LINES_DEL}${RESET}"
+fi
+
+# Compact cwd: $HOME → ~, then if still > 30 chars shrink to …/<last two>.
+# Keeps the identity line narrow without losing the leaf directory name,
+# which is what actually tells you where you're working.
+CWD_H=""
+if [[ -n "$CWD" ]]; then
+  if [[ "$CWD" == "$HOME" ]]; then
+    CWD_H="~"
+  elif [[ "$CWD" == "$HOME"/* ]]; then
+    CWD_H="~${CWD#$HOME}"
+  else
+    CWD_H="$CWD"
+  fi
+  if (( ${#CWD_H} > 30 )); then
+    parent="${CWD_H%/*}"
+    parent_base="${parent##*/}"
+    leaf="${CWD_H##*/}"
+    CWD_H="…/${parent_base}/${leaf}"
+  fi
+fi
+
 # --- Render ------------------------------------------------------------------
 line1="${TAG_COLOR}[${PROFILE}]${RESET} ${MAGENTA}${MODEL}${RESET}"
+[[ -n "$CWD_H" ]] && line1="${line1}  ${BLUE}${ICON_DIR}${CWD_H}${RESET}"
 [[ -n "$GIT_STR" ]] && line1="${line1}  ${GIT_STR}"
 line1="${line1}  ${GREEN}${COST_H}${RESET}  ${DIM}${DUR_H}${RESET}"
+[[ -n "$LINES_STR" ]] && line1="${line1}  ${LINES_STR}"
 
 line2="${CTX_COLOR}${CTX_LABEL}${USED_H}/${MAX_H} ${PCT}%${RESET}"
-line2="${line2}  ${CACHE_COLOR}${CACHE_LABEL}${CACHE_STR}${RESET}"
+cache_seg="${CACHE_COLOR}${CACHE_LABEL}${CACHE_STR}${RESET}"
+[[ -n "$CACHE_HIT_STR" ]] && cache_seg="${cache_seg} ${DIM}${CACHE_HIT_STR}${RESET}"
+line2="${line2}  ${cache_seg}"
 if [[ "${CLAUDE_STATUSLINE_RATELIMITS:-on}" == "on" ]]; then
-  line2="${line2}  ${RL5_COLOR}5h ${RL5}%${RESET}  ${RL7_COLOR}7d ${RL7}%${RESET}"
+  rl5_seg="${RL5_COLOR}5h ${RL5}%${RESET}"
+  [[ -n "$RL5_LEFT" ]] && rl5_seg="${rl5_seg} ${DIM}${RL5_LEFT}${RESET}"
+  rl7_seg="${RL7_COLOR}7d ${RL7}%${RESET}"
+  [[ -n "$RL7_LEFT" ]] && rl7_seg="${rl7_seg} ${DIM}${RL7_LEFT}${RESET}"
+  line2="${line2}  ${rl5_seg}  ${rl7_seg}"
 fi
 
 printf '%s\n%s' "$line1" "$line2"
