@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# claude-sessions — fzf-picker over recent Claude Code session transcripts.
+#
+# Walks ~/.claude/projects/*/*.jsonl (main sessions only — subagent sidechains
+# under */subagents/ are excluded), shows date + project + first user message,
+# and prints the selected transcript path to stdout. Pipe into less/jq/bat or
+# open in an editor.
+#
+# Usage:
+#   claude-sessions            # all projects, most-recent first
+#   claude-sessions --here     # only sessions whose cwd matches current repo
+#   claude-sessions | xargs bat
+#   less "$(claude-sessions)"
+#
+# Deps: fzf, jq. Both from Brewfile.
+
+set -uo pipefail
+
+PROJECTS_DIR="$HOME/.claude/projects"
+[[ -d "$PROJECTS_DIR" ]] || { echo "No $PROJECTS_DIR" >&2; exit 1; }
+
+for cmd in fzf jq; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "$cmd not installed" >&2; exit 1; }
+done
+
+FILTER_CWD=""
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0 ;;
+  --here)
+    FILTER_CWD="$(pwd)" ;;
+  "") ;;
+  *) echo "unknown arg: $1 (try --help)" >&2; exit 2 ;;
+esac
+
+# Extract the first real user-typed message: skip tool_result arrays (which
+# aren't strings) and skip the synthetic <local-command-caveat> / <command-*>
+# / <system-reminder> boilerplate that slash-commands and hooks inject. One
+# line out per input.
+first_user_msg() {
+  local f="$1"
+  jq -r '
+    select(.type == "user" and (.message.content | type) == "string")
+    | .message.content
+    | select(test("^<(local-command-|command-|system-reminder)") | not)' "$f" 2>/dev/null | head -1
+}
+
+session_cwd() {
+  local f="$1"
+  jq -r 'select(.cwd) | .cwd' "$f" 2>/dev/null | head -1
+}
+
+# Build index: one line per session, TSV of fields we'll feed to fzf.
+# Fields: mtime_epoch \t date_display \t project \t preview \t path
+INDEX="$(
+  # Only top-level session files (no */subagents/* sidechain traffic).
+  find "$PROJECTS_DIR" -maxdepth 2 -name '*.jsonl' 2>/dev/null | \
+  while IFS= read -r f; do
+    mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    [[ "$mtime" == 0 ]] && continue
+
+    cwd=$(session_cwd "$f")
+    if [[ -n "$FILTER_CWD" ]]; then
+      [[ "$cwd" == "$FILTER_CWD" ]] || continue
+    fi
+
+    # Date display (local TZ): "Apr 21 17:25"
+    date_disp=$(date -r "$mtime" "+%b %d %H:%M" 2>/dev/null || date -d "@$mtime" "+%b %d %H:%M" 2>/dev/null || echo "?")
+
+    # Project = basename of the recorded cwd (handles multi-dash names like
+    # "alba-hourglass-sync" that the folder-name encoding would otherwise
+    # chop at the last dash). Fall back to the folder name if cwd is missing.
+    if [[ -n "$cwd" ]]; then
+      project=$(basename "$cwd")
+    else
+      project=$(basename "$(dirname "$f")")
+    fi
+
+    preview=$(first_user_msg "$f")
+    preview="${preview//$'\t'/ }"   # strip tabs so TSV stays parseable
+    preview="${preview//$'\n'/ }"
+    # truncate to 100 chars to keep the picker compact
+    if (( ${#preview} > 100 )); then preview="${preview:0:97}…"; fi
+    [[ -z "$preview" ]] && preview="(no user text)"
+
+    printf '%s\t%s\t%-22s\t%s\t%s\n' "$mtime" "$date_disp" "$project" "$preview" "$f"
+  done | sort -rn
+)"
+
+[[ -z "$INDEX" ]] && { echo "No sessions found${FILTER_CWD:+ for $FILTER_CWD}." >&2; exit 1; }
+
+# Preview: show all human-typed user messages in the transcript. Quick read
+# through "what was asked in this session."
+PREVIEW_CMD='jq -r "select(.type == \"user\" and (.message.content | type) == \"string\") | \"── \" + (.timestamp // \"?\") + \"\\n\" + .message.content + \"\\n\"" {5}'
+
+selected=$(
+  printf '%s\n' "$INDEX" | \
+  fzf \
+    --ansi \
+    --with-nth=2,3,4 \
+    --delimiter=$'\t' \
+    --preview="$PREVIEW_CMD" \
+    --preview-window='right,60%,wrap' \
+    --header="Recent Claude Code sessions — enter prints path, esc exits" \
+    --height=90% \
+    --border
+) || exit 0
+
+# Emit the path (5th TSV field) for composability.
+awk -F'\t' '{print $5}' <<<"$selected"
