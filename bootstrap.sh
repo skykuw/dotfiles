@@ -202,6 +202,14 @@ for pkg in */; do
   stow "${stow_opts[@]}" "$pkg"
 done
 
+# --- Enable repo-local git hooks --------------------------------------------
+# Points this clone's core.hooksPath at .githooks/ so the pre-commit lint
+# (shellcheck / jq / zsh -n) runs automatically. Safe to re-run; idempotent.
+if git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "==> Enabling repo git hooks (.githooks)"
+  git -C "$DOTFILES_DIR" config core.hooksPath .githooks
+fi
+
 # --- Install TPM (tmux plugin manager) and plugins --------------------------
 
 if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then

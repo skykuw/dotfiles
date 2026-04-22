@@ -283,7 +283,7 @@ if [[ -n "$CWD" ]]; then
   if [[ "$CWD" == "$HOME" ]]; then
     CWD_H="~"
   elif [[ "$CWD" == "$HOME"/* ]]; then
-    CWD_H="~${CWD#$HOME}"
+    CWD_H="~${CWD#"$HOME"}"
   else
     CWD_H="$CWD"
   fi
